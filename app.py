@@ -151,14 +151,18 @@ def generate_prompt(client, vision_results, openai_description):
         prompt = """
         Based on the provided thumbnail analyses, create a detailed description covering:
         1. What's happening in the thumbnail
-        2. Category of video (e.g., gaming, tutorial, vlog)
+        2. Category of video (e.g., gaming, tutorial, vlog) 
         3. Theme and mood
         4. Colors used and their significance
         5. Elements and objects present
         6. Subject impressions (emotions, expressions)
         7. Text present and its purpose
+        8. Target audience
+        9. Attention-grabbing techniques used
+        10. Suggested improvements (if any)
         
-        Create this as a structured, detailed prompt that could be used to recreate or understand the thumbnail's purpose.
+        Create this as a structured, detailed prompt that could be used to recreate or understand the thumbnail's purpose. 
+        Format your response with clear headings and bullet points for easy readability.
         
         Analysis data:
         """
@@ -236,7 +240,15 @@ def main():
                     detailed_prompt = generate_prompt(openai_client, {"no_vision_api": True}, openai_description)
                 
                 if detailed_prompt:
-                    st.markdown(detailed_prompt)
+                    # Create a formatted output section with copy button
+                    st.markdown("### Detailed Analysis")
+                    
+                    # Add a way to copy the text
+                    st.code(detailed_prompt, language="markdown")
+                    
+                    # Add a copy button (done with a text area that can be selected)
+                    st.markdown("### Copyable Prompt Text")
+                    st.text_area("Copy this prompt text:", value=detailed_prompt, height=250)
                     
                     # Add a download button for the prompt
                     st.download_button(
@@ -245,6 +257,33 @@ def main():
                         file_name="thumbnail_analysis.txt",
                         mime="text/plain"
                     )
+                    
+                    # Combined Analysis Summary
+                    st.subheader("Combined Analysis Summary")
+                    
+                    # Create a summary
+                    summary_prompt = f"""Summarize the key aspects of this thumbnail in bullet points:
+                    - Main subject/focus
+                    - Video category
+                    - Primary colors
+                    - Emotional tone
+                    - Key text elements
+                    - Target audience
+                    
+                    Original analysis: {detailed_prompt}
+                    """
+                    
+                    with st.spinner("Generating summary..."):
+                        try:
+                            summary_response = openai_client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=[
+                                    {"role": "user", "content": summary_prompt}
+                                ],
+                                max_tokens=350
+                            )
+                            summary = summary_response.choices[0].message.content
+                            st.markdown(summary)
 
 if __name__ == "__main__":
     main()
