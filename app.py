@@ -18,27 +18,32 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for YouTube-like styling
+# Custom CSS for YouTube-like styling with dark mode
 st.markdown("""
 <style>
     .main {
-        background-color: #f9f9f9;
+        background-color: #0f0f0f;
+        color: #f1f1f1;
     }
     .stApp {
-        background-color: #f9f9f9;
+        background-color: #0f0f0f;
     }
     h1, h2, h3 {
-        color: #212121;
+        color: #f1f1f1;
         font-family: 'Roboto', sans-serif;
+    }
+    p, li, div {
+        color: #aaaaaa;
     }
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
     .stTabs [data-baseweb="tab"] {
-        background-color: #f8f8f8;
+        background-color: #272727;
         border-radius: 4px 4px 0px 0px;
         padding: 10px 16px;
         font-weight: 500;
+        color: #f1f1f1;
     }
     .stTabs [aria-selected="true"] {
         background-color: #ff0000;
@@ -54,12 +59,44 @@ st.markdown("""
     }
     .stTextInput>div>div>input {
         border-radius: 20px;
+        background-color: #121212;
+        color: #f1f1f1;
+        border: 1px solid #303030;
+    }
+    .stTextArea>div>div>textarea {
+        background-color: #121212;
+        color: #f1f1f1;
     }
     .thumbnail-container {
-        border: 1px solid #e0e0e0;
+        border: 1px solid #303030;
         border-radius: 8px;
         padding: 10px;
-        background-color: white;
+        background-color: #181818;
+    }
+    .stExpander {
+        background-color: #181818;
+        border: 1px solid #303030;
+    }
+    .stAlert {
+        background-color: #181818;
+        color: #f1f1f1;
+    }
+    .stMarkdown {
+        color: #f1f1f1;
+    }
+    /* Fix for radio buttons and other controls */
+    .stRadio label {
+        color: #f1f1f1 !important;
+    }
+    .stSpinner > div {
+        border-top-color: #f1f1f1 !important;
+    }
+    /* Code blocks and JSON display */
+    pre {
+        background-color: #121212 !important;
+    }
+    code {
+        color: #a9dc76 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -337,9 +374,9 @@ def generate_prompt_variations(client, original_prompt):
 
 # Main app
 def main():
-    # Custom header with YouTube-like design
-    st.markdown('<div style="display: flex; align-items: center; padding: 10px 0;"><span style="color: #FF0000; font-size: 28px; font-weight: bold; margin-right: 5px;">▶️</span> <h1 style="margin: 0; color: #212121;">YouTube Thumbnail Analyzer</h1></div>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #606060; margin-top: 0;">Analyze thumbnails using AI to understand what makes them effective</p>', unsafe_allow_html=True)
+    # Custom header with YouTube-like design (dark mode)
+    st.markdown('<div style="display: flex; align-items: center; padding: 10px 0;"><span style="color: #FF0000; font-size: 28px; font-weight: bold; margin-right: 5px;">▶️</span> <h1 style="margin: 0; color: #f1f1f1;">YouTube Thumbnail Analyzer</h1></div>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #aaaaaa; margin-top: 0;">Analyze thumbnails using AI to understand what makes them effective</p>', unsafe_allow_html=True)
     
     # Initialize and check API clients
     vision_client, openai_client = setup_credentials()
@@ -408,7 +445,7 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
             
             if input_option == "YouTube URL" and "id" in video_info:
-                st.markdown(f'<a href="{video_info["url"]}" target="_blank" style="color: #065fd4; text-decoration: none; font-weight: 500;">View Original Video</a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="{video_info["url"]}" target="_blank" style="color: #3ea6ff; text-decoration: none; font-weight: 500;">View Original Video</a>', unsafe_allow_html=True)
         
         # Process the image
         with st.spinner("Analyzing thumbnail..."):
