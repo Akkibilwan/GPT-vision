@@ -284,6 +284,8 @@ def main():
                             )
                             summary = summary_response.choices[0].message.content
                             st.markdown(summary)
+                        except Exception as e:
+                            st.error(f"Error generating summary: {e}")
 
 if __name__ == "__main__":
     main()
