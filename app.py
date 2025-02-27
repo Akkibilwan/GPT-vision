@@ -139,8 +139,8 @@ def analyze_with_openai(client, base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Function to generate detailed prompt using OpenAI based on both analyses
-def generate_prompt(client, vision_results, openai_description):
+# Function to analyze image (structured analysis)
+def generate_analysis(client, vision_results, openai_description):
     try:
         # Prepare input for GPT
         input_data = {
@@ -149,31 +149,74 @@ def generate_prompt(client, vision_results, openai_description):
         }
         
         prompt = """
-        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create TWO distinct outputs:
+        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a structured analysis covering:
+        - What's happening in the thumbnail
+        - Category of video (e.g., gaming, tutorial, vlog) 
+        - Theme and mood
+        - Colors used and their significance
+        - Elements and objects present
+        - Subject impressions (emotions, expressions)
+        - Text present and its purpose
+        - Target audience
         
-        1. ANALYSIS - A structured analysis covering:
-           - What's happening in the thumbnail
-           - Category of video (e.g., gaming, tutorial, vlog) 
-           - Theme and mood
-           - Colors used and their significance
-           - Elements and objects present
-           - Subject impressions (emotions, expressions)
-           - Text present and its purpose
-           - Target audience
-        
-        2. PROMPT - A cohesive, detailed paragraph (not bullet points) that very specifically defines the thumbnail, describing:
-           - The exact theme
-           - Specific colors used and how they interact
-           - All visual elements and their arrangement
-           - Overall style and artistic approach
-           - Text elements and their presentation
-           - Emotional impact the thumbnail is designed to create
-        
-        Format your response with clear separation between the ANALYSIS and PROMPT sections.
-        The PROMPT paragraph should be comprehensive enough that someone could recreate the thumbnail from the description alone.
+        Format your response with clear headings and bullet points for easy readability.
         
         Analysis data:
         """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed analyses based on image analysis data."},
+                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+            ],
+            max_tokens=800
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error generating analysis: {e}")
+        return None
+
+# Function to generate a specific prompt paragraph
+def generate_prompt_paragraph(client, vision_results, openai_description):
+    try:
+        # Prepare input for GPT
+        input_data = {
+            "vision_analysis": vision_results,
+            "openai_description": openai_description
+        }
+        
+        prompt = """
+        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail.
+        
+        This paragraph must describe in detail:
+        - The exact theme and purpose of the thumbnail
+        - Specific colors used and how they interact with each other
+        - All visual elements and their precise arrangement in the composition
+        - Overall style and artistic approach used in the design
+        - Any text elements and exactly how they are presented
+        - The emotional impact the thumbnail is designed to create on viewers
+        
+        Make this paragraph comprehensive and detailed enough that someone could recreate the thumbnail exactly from your description alone.
+        DO NOT use bullet points or separate sections - this must be a flowing, cohesive paragraph.
+        
+        Analysis data:
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
+                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+            ],
+            max_tokens=800
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error generating prompt paragraph: {e}")
+        return None
         
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -235,49 +278,61 @@ def main():
                 with st.expander("OpenAI Description"):
                     st.write(openai_description)
             
-            # Generate the detailed prompt
-            with st.spinner("Analyzing thumbnail and generating results..."):
-                time.sleep(1)  # Small delay for better UX
-                
+            # Generate both analysis and prompt separately
+            with st.spinner("Analyzing thumbnail..."):
                 if vision_results:
-                    # Use both analyses if Vision API is available
-                    combined_analysis = generate_prompt(openai_client, vision_results, openai_description)
+                    # Generate structured analysis
+                    analysis = generate_analysis(openai_client, vision_results, openai_description)
+                    
+                    # Display the Analysis section
+                    st.subheader("Detailed Analysis")
+                    st.markdown(analysis)
+                    
+                    # Create a collapsible container for Vision API results
+                    with st.expander("View Raw Vision API Results"):
+                        st.json(vision_results)
+                        
+                    # Generate the specific prompt paragraph in a separate call
+                    st.subheader("Thumbnail Prompt")
+                    with st.spinner("Generating specific prompt..."):
+                        prompt_paragraph = generate_prompt_paragraph(openai_client, vision_results, openai_description)
+                        
+                        # Display prompt in a text area for easy copying
+                        st.text_area("Copy this prompt:", value=prompt_paragraph, height=200)
+                        
+                        # Add a download button for just the prompt
+                        st.download_button(
+                            label="Download Prompt",
+                            data=prompt_paragraph,
+                            file_name="thumbnail_prompt.txt",
+                            mime="text/plain"
+                        )
                 else:
                     # Use only OpenAI description if Vision API is not available
-                    combined_analysis = generate_prompt(openai_client, {"no_vision_api": True}, openai_description)
-                
-                if combined_analysis:
-                    try:
-                        # Split the response into Analysis and Prompt sections
-                        sections = combined_analysis.split("PROMPT")
+                    st.warning("Google Vision API results not available. Analysis will be based only on OpenAI's image understanding.")
+                    
+                    # Generate structured analysis
+                    analysis = generate_analysis(openai_client, {"no_vision_api": True}, openai_description)
+                    
+                    # Display the Analysis section
+                    st.subheader("Detailed Analysis")
+                    st.markdown(analysis)
+                    
+                    # Generate the specific prompt paragraph in a separate call
+                    st.subheader("Thumbnail Prompt")
+                    with st.spinner("Generating specific prompt..."):
+                        prompt_paragraph = generate_prompt_paragraph(openai_client, {"no_vision_api": True}, openai_description)
                         
-                        if len(sections) > 1:
-                            analysis_part = sections[0].replace("ANALYSIS", "").strip()
-                            prompt_part = sections[1].strip()
-                            
-                            # Display the Analysis section
-                            st.subheader("Detailed Analysis")
-                            st.markdown(analysis_part)
-                            
-                            # Display the Prompt section
-                            st.subheader("Thumbnail Prompt")
-                            
-                            # Display prompt in a text area for easy copying
-                            st.text_area("Copy this prompt:", value=prompt_part, height=200)
-                            
-                            # Add a download button for just the prompt
-                            st.download_button(
-                                label="Download Prompt",
-                                data=prompt_part,
-                                file_name="thumbnail_prompt.txt",
-                                mime="text/plain"
-                            )
-                        else:
-                            # If splitting didn't work as expected, show the entire output
-                            st.markdown(combined_analysis)
-                    except Exception as e:
-                        st.error(f"Error parsing the analysis output: {e}")
-                        st.markdown(combined_analysis)
+                        # Display prompt in a text area for easy copying
+                        st.text_area("Copy this prompt:", value=prompt_paragraph, height=200)
+                        
+                        # Add a download button for just the prompt
+                        st.download_button(
+                            label="Download Prompt",
+                            data=prompt_paragraph,
+                            file_name="thumbnail_prompt.txt",
+                            mime="text/plain"
+                        )
 
 if __name__ == "__main__":
     main()
