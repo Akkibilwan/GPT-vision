@@ -1,45 +1,9 @@
-# Function to generate a specific prompt paragraph
-def generate_prompt_paragraph(client, vision_results, openai_description):
-    try:
-        # Prepare input for GPT
-        input_data = {
-            "vision_analysis": vision_results,
-            "openai_description": openai_description
-        }
-        
-        prompt = """
-        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail.
-        
-        This paragraph must describe in detail:
-        - The exact theme and purpose of the thumbnail
-        - Specific colors used and how they interact with each other
-        - All visual elements and their precise arrangement in the composition
-        - Overall style and artistic approach used in the design
-        - Any text elements and exactly how they are presented
-        - The emotional impact the thumbnail is designed to create on viewers
-        
-        Make this paragraph comprehensive and detailed enough that someone could recreate the thumbnail exactly from your description alone.
-        DO NOT use bullet points or separate sections - this must be a flowing, cohesive paragraph.
-        
-        Analysis data:
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
-            ],
-            max_tokens=800
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Error generating prompt paragraph: {e}")
-        return Noneimport streamlit as st
+import streamlit as st
 import os
 import io
 import json
+import re
+import requests
 from PIL import Image
 from google.cloud import vision
 from google.oauth2 import service_account
@@ -49,10 +13,56 @@ import time
 
 # Set page configuration
 st.set_page_config(
-    page_title="Thumbnail Analyzer",
-    page_icon="🔍",
+    page_title="YouTube Thumbnail Analyzer",
+    page_icon="🎬",
     layout="wide"
 )
+
+# Custom CSS for YouTube-like styling
+st.markdown("""
+<style>
+    .main {
+        background-color: #f9f9f9;
+    }
+    .stApp {
+        background-color: #f9f9f9;
+    }
+    h1, h2, h3 {
+        color: #212121;
+        font-family: 'Roboto', sans-serif;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f8f8f8;
+        border-radius: 4px 4px 0px 0px;
+        padding: 10px 16px;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #ff0000;
+        color: white;
+    }
+    .stButton>button {
+        background-color: #ff0000;
+        color: white;
+        border: none;
+        border-radius: 2px;
+        padding: 8px 16px;
+        font-weight: 500;
+    }
+    .stTextInput>div>div>input {
+        border-radius: 20px;
+    }
+    .thumbnail-container {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 10px;
+        background-color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Function to setup API credentials
 def setup_credentials():
@@ -69,35 +79,29 @@ def setup_credentials():
             
             credentials = service_account.Credentials.from_service_account_info(credentials_dict)
             vision_client = vision.ImageAnnotatorClient(credentials=credentials)
-            st.success("Google Vision API credentials loaded successfully.")
         else:
             # Check for local file
             if os.path.exists("service-account.json"):
                 credentials = service_account.Credentials.from_service_account_file("service-account.json")
                 vision_client = vision.ImageAnnotatorClient(credentials=credentials)
-                st.success("Google Vision API credentials loaded from local file.")
             else:
                 # Look for credentials in environment variable
                 credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
                 if credentials_path and os.path.exists(credentials_path):
                     vision_client = vision.ImageAnnotatorClient()
-                    st.success("Google Vision API credentials loaded from environment variable.")
                 else:
-                    st.error("Google Vision API credentials not found.")
+                    st.info("Google Vision API credentials not found. Analysis will use only OpenAI.")
     except Exception as e:
-        st.error(f"Error loading Google Vision API credentials: {e}")
+        st.info(f"Google Vision API not available: {e}")
     
     # For OpenAI API
     try:
         api_key = None
         if 'OPENAI_API_KEY' in st.secrets:
             api_key = st.secrets["OPENAI_API_KEY"]
-            st.success("OpenAI API key loaded successfully.")
         else:
             api_key = os.environ.get('OPENAI_API_KEY')
-            if api_key:
-                st.success("OpenAI API key loaded from environment variable.")
-            else:
+            if not api_key:
                 api_key = st.text_input("Enter your OpenAI API key:", type="password")
                 if not api_key:
                     st.warning("Please enter an OpenAI API key to continue.")
@@ -108,6 +112,48 @@ def setup_credentials():
         st.error(f"Error setting up OpenAI API: {e}")
     
     return vision_client, openai_client
+
+# Function to get YouTube video ID from URL
+def extract_video_id(url):
+    # Regular expressions to match different YouTube URL formats
+    youtube_regex = (
+        r'(https?://)?(www\.)?'
+        '(youtube|youtu|youtube-nocookie)\.(com|be)/'
+        '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})')
+    
+    youtube_match = re.match(youtube_regex, url)
+    if youtube_match:
+        return youtube_match.group(6)
+    return None
+
+# Function to get thumbnail URL from video ID
+def get_thumbnail_url(video_id):
+    # Try to get the maxres thumbnail first, then fall back to high quality if not available
+    thumbnail_urls = [
+        f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+        f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
+        f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
+        f"https://img.youtube.com/vi/{video_id}/default.jpg"
+    ]
+    
+    for url in thumbnail_urls:
+        response = requests.head(url)
+        if response.status_code == 200 and int(response.headers.get('Content-Length', 0)) > 1000:
+            return url
+    
+    return None
+
+# Function to download thumbnail from URL
+def download_thumbnail(url):
+    try:
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            return response.content
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error downloading thumbnail: {e}")
+        return None
 
 # Function to analyze image with Google Vision API
 def analyze_with_vision(image_bytes, vision_client):
@@ -216,6 +262,46 @@ def generate_analysis(client, vision_results, openai_description):
         st.error(f"Error generating analysis: {e}")
         return None
 
+# Function to generate a specific prompt paragraph
+def generate_prompt_paragraph(client, vision_results, openai_description):
+    try:
+        # Prepare input for GPT
+        input_data = {
+            "vision_analysis": vision_results,
+            "openai_description": openai_description
+        }
+        
+        prompt = """
+        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail.
+        
+        This paragraph must describe in detail:
+        - The exact theme and purpose of the thumbnail
+        - Specific colors used and how they interact with each other
+        - All visual elements and their precise arrangement in the composition
+        - Overall style and artistic approach used in the design
+        - Any text elements and exactly how they are presented
+        - The emotional impact the thumbnail is designed to create on viewers
+        
+        Make this paragraph comprehensive and detailed enough that someone could recreate the thumbnail exactly from your description alone.
+        DO NOT use bullet points or separate sections - this must be a flowing, cohesive paragraph.
+        
+        Analysis data:
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
+                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+            ],
+            max_tokens=800
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error generating prompt paragraph: {e}")
+        return None
+
 # Function to generate prompt variations
 def generate_prompt_variations(client, original_prompt):
     try:
@@ -248,25 +334,12 @@ def generate_prompt_variations(client, original_prompt):
     except Exception as e:
         st.error(f"Error generating prompt variations: {e}")
         return None
-        
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed prompts based on image analysis data."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
-            ],
-            max_tokens=800
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Error generating prompt: {e}")
-        return None
 
 # Main app
 def main():
-    st.title("YouTube Thumbnail Analyzer")
-    st.write("Upload a thumbnail to analyze it using Google Vision AI and OpenAI, and generate a detailed prompt.")
+    # Custom header with YouTube-like design
+    st.markdown('<div style="display: flex; align-items: center; padding: 10px 0;"><span style="color: #FF0000; font-size: 28px; font-weight: bold; margin-right: 5px;">▶️</span> <h1 style="margin: 0; color: #212121;">YouTube Thumbnail Analyzer</h1></div>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #606060; margin-top: 0;">Analyze thumbnails using AI to understand what makes them effective</p>', unsafe_allow_html=True)
     
     # Initialize and check API clients
     vision_client, openai_client = setup_credentials()
@@ -275,199 +348,154 @@ def main():
         st.error("OpenAI client not initialized. Please check your API key.")
         return
     
-    # File uploader
-    uploaded_file = st.file_uploader("Choose a thumbnail image...", type=["jpg", "jpeg", "png"])
+    # Input options
+    input_option = st.radio(
+        "Select input method:",
+        ["Upload Image", "YouTube URL"],
+        horizontal=True
+    )
     
-    if uploaded_file is not None:
-        # Display the uploaded image
-        image = Image.open(uploaded_file)
+    image_bytes = None
+    image = None
+    video_info = {}
+    
+    if input_option == "Upload Image":
+        # File uploader
+        uploaded_file = st.file_uploader("Choose a thumbnail image...", type=["jpg", "jpeg", "png"])
+        
+        if uploaded_file is not None:
+            # Display the uploaded image
+            image = Image.open(uploaded_file)
+            
+            # Convert to bytes for API processing
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format=image.format if image.format else 'JPEG')
+            image_bytes = img_byte_arr.getvalue()
+    
+    else:  # YouTube URL
+        # YouTube URL input
+        youtube_url = st.text_input("Enter YouTube video URL:", placeholder="https://www.youtube.com/watch?v=...")
+        
+        if youtube_url:
+            video_id = extract_video_id(youtube_url)
+            if video_id:
+                video_info["id"] = video_id
+                video_info["url"] = youtube_url
+                
+                # Get thumbnail URL
+                thumbnail_url = get_thumbnail_url(video_id)
+                if thumbnail_url:
+                    video_info["thumbnail_url"] = thumbnail_url
+                    
+                    # Download thumbnail
+                    image_bytes = download_thumbnail(thumbnail_url)
+                    if image_bytes:
+                        # Display the thumbnail
+                        image = Image.open(io.BytesIO(image_bytes))
+                        video_info["title"] = f"Thumbnail for Video ID: {video_id}"
+                else:
+                    st.error("Could not retrieve thumbnail for this video.")
+            else:
+                st.error("Invalid YouTube URL. Please enter a valid YouTube video URL.")
+    
+    # If we have image bytes, process the image
+    if image_bytes and image:
         col1, col2 = st.columns([1, 2])
+        
         with col1:
-            st.image(image, caption="Uploaded Thumbnail", use_column_width=True)
+            st.markdown('<div class="thumbnail-container">', unsafe_allow_html=True)
+            st.image(image, caption="Thumbnail" if input_option == "Upload Image" else video_info.get("title", "YouTube Thumbnail"), use_column_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            if input_option == "YouTube URL" and "id" in video_info:
+                st.markdown(f'<a href="{video_info["url"]}" target="_blank" style="color: #065fd4; text-decoration: none; font-weight: 500;">View Original Video</a>', unsafe_allow_html=True)
         
-        # Convert to bytes for API processing
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format=image.format if image.format else 'JPEG')
-        img_byte_arr = img_byte_arr.getvalue()
-        
+        # Process the image
         with st.spinner("Analyzing thumbnail..."):
-            # Process with OpenAI (always available if we've gotten this far)
-            base64_image = encode_image(img_byte_arr)
+            # Process with OpenAI Vision
+            base64_image = encode_image(image_bytes)
             openai_description = analyze_with_openai(openai_client, base64_image)
             
-            # Process with Google Vision API (if available)
+            # Process with Google Vision API if available
             vision_results = None
             if vision_client:
-                vision_results = analyze_with_vision(img_byte_arr, vision_client)
+                vision_results = analyze_with_vision(image_bytes, vision_client)
             
-            # Show raw analysis results in expanders
+            # Display analysis
             with col2:
-                if vision_results:
-                    with st.expander("Google Vision API Results"):
-                        st.json(vision_results)
+                st.subheader("Thumbnail Analysis")
                 
-                with st.expander("OpenAI Description"):
-                    st.write(openai_description)
-            
-            # Generate both analysis and prompt separately
-            with st.spinner("Analyzing thumbnail..."):
+                # Generate structured analysis
+                analysis = generate_analysis(openai_client, vision_results if vision_results else {"no_vision_api": True}, openai_description)
+                st.markdown(analysis)
+                
                 if vision_results:
-                    # Generate structured analysis
-                    analysis = generate_analysis(openai_client, vision_results, openai_description)
-                    
-                    # Display the Analysis section
-                    st.subheader("Detailed Analysis")
-                    st.markdown(analysis)
-                    
-                    # Create a collapsible container for Vision API results
                     with st.expander("View Raw Vision API Results"):
                         st.json(vision_results)
+                
+                with st.expander("View Raw OpenAI Description"):
+                    st.write(openai_description)
+            
+            # Generate prompt variations
+            st.subheader("Thumbnail Prompts")
+            tabs = st.tabs(["Original", "Variation 1", "Variation 2"])
+            
+            with st.spinner("Generating prompts..."):
+                # Generate original prompt
+                prompt_paragraph = generate_prompt_paragraph(
+                    openai_client, 
+                    vision_results if vision_results else {"no_vision_api": True}, 
+                    openai_description
+                )
+                
+                with tabs[0]:
+                    st.subheader("Original Prompt")
+                    st.text_area("Copy this prompt:", value=prompt_paragraph, height=150, key="original_prompt")
+                    st.download_button(
+                        label="Download Original Prompt",
+                        data=prompt_paragraph,
+                        file_name="thumbnail_original_prompt.txt",
+                        mime="text/plain"
+                    )
+                
+                # Generate variations
+                variations = generate_prompt_variations(openai_client, prompt_paragraph)
+                
+                # Parse variations
+                try:
+                    variation_parts = variations.split("VARIATION")
+                    
+                    if len(variation_parts) >= 3:
+                        variation1 = variation_parts[1].replace("1:", "").strip()
+                        variation2 = variation_parts[2].replace("2:", "").strip()
                         
-                    # Generate the specific prompt paragraph in a separate call
-                    st.subheader("Thumbnail Prompts")
-                    with st.spinner("Generating specific prompts..."):
-                        prompt_paragraph = generate_prompt_paragraph(openai_client, vision_results, openai_description)
-                        
-                        # Create tabs for the different prompts
-                        prompt_tab1, prompt_tab2, prompt_tab3 = st.tabs(["Original Prompt", "Variation 1", "Variation 2"])
-                        
-                        with prompt_tab1:
-                            st.subheader("Original Prompt")
-                            # Display prompt in a text area for easy copying
-                            st.text_area("Copy this prompt:", value=prompt_paragraph, height=200, key="original_prompt")
-                            
-                            # Add a download button for just the prompt
+                        with tabs[1]:
+                            st.subheader("Variation 1")
+                            st.text_area("Copy this prompt:", value=variation1, height=150, key="variation1")
                             st.download_button(
-                                label="Download Original Prompt",
-                                data=prompt_paragraph,
-                                file_name="thumbnail_original_prompt.txt",
+                                label="Download Variation 1",
+                                data=variation1,
+                                file_name="thumbnail_variation1.txt",
                                 mime="text/plain"
                             )
                         
-                        # Generate variations based on the original prompt
-                        with st.spinner("Generating prompt variations..."):
-                            variations = generate_prompt_variations(openai_client, prompt_paragraph)
-                            
-                            # Split the variations
-                            try:
-                                variation_parts = variations.split("VARIATION")
-                                
-                                # Extract the two variations (skipping the first empty part)
-                                if len(variation_parts) >= 3:
-                                    variation1 = variation_parts[1].replace("1:", "").strip()
-                                    variation2 = variation_parts[2].replace("2:", "").strip()
-                                    
-                                    with prompt_tab2:
-                                        st.subheader("Variation 1")
-                                        st.text_area("Copy this prompt:", value=variation1, height=200, key="variation1")
-                                        st.download_button(
-                                            label="Download Variation 1",
-                                            data=variation1,
-                                            file_name="thumbnail_variation1.txt",
-                                            mime="text/plain"
-                                        )
-                                    
-                                    with prompt_tab3:
-                                        st.subheader("Variation 2")
-                                        st.text_area("Copy this prompt:", value=variation2, height=200, key="variation2")
-                                        st.download_button(
-                                            label="Download Variation 2",
-                                            data=variation2,
-                                            file_name="thumbnail_variation2.txt",
-                                            mime="text/plain"
-                                        )
-                                else:
-                                    # If splitting didn't work as expected
-                                    with prompt_tab2:
-                                        st.markdown("Unable to properly parse variation 1.")
-                                        st.markdown(variations)
-                                    
-                                    with prompt_tab3:
-                                        st.markdown("Unable to properly parse variation 2.")
-                            except Exception as e:
-                                st.error(f"Error parsing variations: {e}")
-                                with prompt_tab2:
-                                    st.markdown("Error generating variations.")
-                                with prompt_tab3:
-                                    st.markdown(variations)
-                else:
-                    # Use only OpenAI description if Vision API is not available
-                    st.warning("Google Vision API results not available. Analysis will be based only on OpenAI's image understanding.")
-                    
-                    # Generate structured analysis
-                    analysis = generate_analysis(openai_client, {"no_vision_api": True}, openai_description)
-                    
-                    # Display the Analysis section
-                    st.subheader("Detailed Analysis")
-                    st.markdown(analysis)
-                    
-                    # Generate the specific prompt paragraph in a separate call
-                    st.subheader("Thumbnail Prompts")
-                    with st.spinner("Generating specific prompt..."):
-                        prompt_paragraph = generate_prompt_paragraph(openai_client, {"no_vision_api": True}, openai_description)
-                        
-                        # Create tabs for the different prompts
-                        prompt_tab1, prompt_tab2, prompt_tab3 = st.tabs(["Original Prompt", "Variation 1", "Variation 2"])
-                        
-                        with prompt_tab1:
-                            st.subheader("Original Prompt")
-                            # Display prompt in a text area for easy copying
-                            st.text_area("Copy this prompt:", value=prompt_paragraph, height=200, key="original_prompt")
-                            
-                            # Add a download button for just the prompt
+                        with tabs[2]:
+                            st.subheader("Variation 2")
+                            st.text_area("Copy this prompt:", value=variation2, height=150, key="variation2")
                             st.download_button(
-                                label="Download Original Prompt",
-                                data=prompt_paragraph,
-                                file_name="thumbnail_original_prompt.txt",
+                                label="Download Variation 2",
+                                data=variation2,
+                                file_name="thumbnail_variation2.txt",
                                 mime="text/plain"
                             )
+                    else:
+                        with tabs[1]:
+                            st.warning("Unable to properly parse variation 1.")
                         
-                        # Generate variations based on the original prompt
-                        with st.spinner("Generating prompt variations..."):
-                            variations = generate_prompt_variations(openai_client, prompt_paragraph)
-                            
-                            # Split the variations
-                            try:
-                                variation_parts = variations.split("VARIATION")
-                                
-                                # Extract the two variations (skipping the first empty part)
-                                if len(variation_parts) >= 3:
-                                    variation1 = variation_parts[1].replace("1:", "").strip()
-                                    variation2 = variation_parts[2].replace("2:", "").strip()
-                                    
-                                    with prompt_tab2:
-                                        st.subheader("Variation 1")
-                                        st.text_area("Copy this prompt:", value=variation1, height=200, key="variation1")
-                                        st.download_button(
-                                            label="Download Variation 1",
-                                            data=variation1,
-                                            file_name="thumbnail_variation1.txt",
-                                            mime="text/plain"
-                                        )
-                                    
-                                    with prompt_tab3:
-                                        st.subheader("Variation 2")
-                                        st.text_area("Copy this prompt:", value=variation2, height=200, key="variation2")
-                                        st.download_button(
-                                            label="Download Variation 2",
-                                            data=variation2,
-                                            file_name="thumbnail_variation2.txt",
-                                            mime="text/plain"
-                                        )
-                                else:
-                                    # If splitting didn't work as expected
-                                    with prompt_tab2:
-                                        st.markdown("Unable to properly parse variation 1.")
-                                        st.markdown(variations)
-                                    
-                                    with prompt_tab3:
-                                        st.markdown("Unable to properly parse variation 2.")
-                            except Exception as e:
-                                st.error(f"Error parsing variations: {e}")
-                                with prompt_tab2:
-                                    st.markdown("Error generating variations.")
-                                with prompt_tab3:
-                                    st.markdown(variations)
+                        with tabs[2]:
+                            st.warning("Unable to properly parse variation 2.")
+                except Exception as e:
+                    st.error(f"Error parsing variations: {e}")
 
 if __name__ == "__main__":
     main()
