@@ -1,4 +1,42 @@
-import streamlit as st
+# Function to generate a specific prompt paragraph
+def generate_prompt_paragraph(client, vision_results, openai_description):
+    try:
+        # Prepare input for GPT
+        input_data = {
+            "vision_analysis": vision_results,
+            "openai_description": openai_description
+        }
+        
+        prompt = """
+        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail.
+        
+        This paragraph must describe in detail:
+        - The exact theme and purpose of the thumbnail
+        - Specific colors used and how they interact with each other
+        - All visual elements and their precise arrangement in the composition
+        - Overall style and artistic approach used in the design
+        - Any text elements and exactly how they are presented
+        - The emotional impact the thumbnail is designed to create on viewers
+        
+        Make this paragraph comprehensive and detailed enough that someone could recreate the thumbnail exactly from your description alone.
+        DO NOT use bullet points or separate sections - this must be a flowing, cohesive paragraph.
+        
+        Analysis data:
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
+                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+            ],
+            max_tokens=800
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error generating prompt paragraph: {e}")
+        return Noneimport streamlit as st
 import os
 import io
 import json
@@ -178,44 +216,37 @@ def generate_analysis(client, vision_results, openai_description):
         st.error(f"Error generating analysis: {e}")
         return None
 
-# Function to generate a specific prompt paragraph
-def generate_prompt_paragraph(client, vision_results, openai_description):
+# Function to generate prompt variations
+def generate_prompt_variations(client, original_prompt):
     try:
-        # Prepare input for GPT
-        input_data = {
-            "vision_analysis": vision_results,
-            "openai_description": openai_description
-        }
+        variation_prompt = f"""
+        Below is a detailed description of a YouTube thumbnail:
         
-        prompt = """
-        Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail.
+        {original_prompt}
         
-        This paragraph must describe in detail:
-        - The exact theme and purpose of the thumbnail
-        - Specific colors used and how they interact with each other
-        - All visual elements and their precise arrangement in the composition
-        - Overall style and artistic approach used in the design
-        - Any text elements and exactly how they are presented
-        - The emotional impact the thumbnail is designed to create on viewers
+        Create TWO alternative prompt variations that could describe a thumbnail with the same core message and purpose, but with different visual elements, styles, or approaches.
         
-        Make this paragraph comprehensive and detailed enough that someone could recreate the thumbnail exactly from your description alone.
-        DO NOT use bullet points or separate sections - this must be a flowing, cohesive paragraph.
+        Each variation should:
+        1. Maintain the same overall message and purpose of the thumbnail
+        2. Change visual elements, colors, composition, or style
+        3. Be a single cohesive paragraph (not bullet points)
+        4. Be detailed enough that someone could create the thumbnail from the description
         
-        Analysis data:
+        Label them clearly as "VARIATION 1:" and "VARIATION 2:" and make them distinctly different from each other and from the original.
         """
         
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+                {"role": "system", "content": "You are a creative thumbnail designer who creates varied but purposeful alternatives."},
+                {"role": "user", "content": variation_prompt}
             ],
-            max_tokens=800
+            max_tokens=1200
         )
         
         return response.choices[0].message.content
     except Exception as e:
-        st.error(f"Error generating prompt paragraph: {e}")
+        st.error(f"Error generating prompt variations: {e}")
         return None
         
         response = client.chat.completions.create(
@@ -293,20 +324,72 @@ def main():
                         st.json(vision_results)
                         
                     # Generate the specific prompt paragraph in a separate call
-                    st.subheader("Thumbnail Prompt")
-                    with st.spinner("Generating specific prompt..."):
+                    st.subheader("Thumbnail Prompts")
+                    with st.spinner("Generating specific prompts..."):
                         prompt_paragraph = generate_prompt_paragraph(openai_client, vision_results, openai_description)
                         
-                        # Display prompt in a text area for easy copying
-                        st.text_area("Copy this prompt:", value=prompt_paragraph, height=200)
+                        # Create tabs for the different prompts
+                        prompt_tab1, prompt_tab2, prompt_tab3 = st.tabs(["Original Prompt", "Variation 1", "Variation 2"])
                         
-                        # Add a download button for just the prompt
-                        st.download_button(
-                            label="Download Prompt",
-                            data=prompt_paragraph,
-                            file_name="thumbnail_prompt.txt",
-                            mime="text/plain"
-                        )
+                        with prompt_tab1:
+                            st.subheader("Original Prompt")
+                            # Display prompt in a text area for easy copying
+                            st.text_area("Copy this prompt:", value=prompt_paragraph, height=200, key="original_prompt")
+                            
+                            # Add a download button for just the prompt
+                            st.download_button(
+                                label="Download Original Prompt",
+                                data=prompt_paragraph,
+                                file_name="thumbnail_original_prompt.txt",
+                                mime="text/plain"
+                            )
+                        
+                        # Generate variations based on the original prompt
+                        with st.spinner("Generating prompt variations..."):
+                            variations = generate_prompt_variations(openai_client, prompt_paragraph)
+                            
+                            # Split the variations
+                            try:
+                                variation_parts = variations.split("VARIATION")
+                                
+                                # Extract the two variations (skipping the first empty part)
+                                if len(variation_parts) >= 3:
+                                    variation1 = variation_parts[1].replace("1:", "").strip()
+                                    variation2 = variation_parts[2].replace("2:", "").strip()
+                                    
+                                    with prompt_tab2:
+                                        st.subheader("Variation 1")
+                                        st.text_area("Copy this prompt:", value=variation1, height=200, key="variation1")
+                                        st.download_button(
+                                            label="Download Variation 1",
+                                            data=variation1,
+                                            file_name="thumbnail_variation1.txt",
+                                            mime="text/plain"
+                                        )
+                                    
+                                    with prompt_tab3:
+                                        st.subheader("Variation 2")
+                                        st.text_area("Copy this prompt:", value=variation2, height=200, key="variation2")
+                                        st.download_button(
+                                            label="Download Variation 2",
+                                            data=variation2,
+                                            file_name="thumbnail_variation2.txt",
+                                            mime="text/plain"
+                                        )
+                                else:
+                                    # If splitting didn't work as expected
+                                    with prompt_tab2:
+                                        st.markdown("Unable to properly parse variation 1.")
+                                        st.markdown(variations)
+                                    
+                                    with prompt_tab3:
+                                        st.markdown("Unable to properly parse variation 2.")
+                            except Exception as e:
+                                st.error(f"Error parsing variations: {e}")
+                                with prompt_tab2:
+                                    st.markdown("Error generating variations.")
+                                with prompt_tab3:
+                                    st.markdown(variations)
                 else:
                     # Use only OpenAI description if Vision API is not available
                     st.warning("Google Vision API results not available. Analysis will be based only on OpenAI's image understanding.")
@@ -319,20 +402,72 @@ def main():
                     st.markdown(analysis)
                     
                     # Generate the specific prompt paragraph in a separate call
-                    st.subheader("Thumbnail Prompt")
+                    st.subheader("Thumbnail Prompts")
                     with st.spinner("Generating specific prompt..."):
                         prompt_paragraph = generate_prompt_paragraph(openai_client, {"no_vision_api": True}, openai_description)
                         
-                        # Display prompt in a text area for easy copying
-                        st.text_area("Copy this prompt:", value=prompt_paragraph, height=200)
+                        # Create tabs for the different prompts
+                        prompt_tab1, prompt_tab2, prompt_tab3 = st.tabs(["Original Prompt", "Variation 1", "Variation 2"])
                         
-                        # Add a download button for just the prompt
-                        st.download_button(
-                            label="Download Prompt",
-                            data=prompt_paragraph,
-                            file_name="thumbnail_prompt.txt",
-                            mime="text/plain"
-                        )
+                        with prompt_tab1:
+                            st.subheader("Original Prompt")
+                            # Display prompt in a text area for easy copying
+                            st.text_area("Copy this prompt:", value=prompt_paragraph, height=200, key="original_prompt")
+                            
+                            # Add a download button for just the prompt
+                            st.download_button(
+                                label="Download Original Prompt",
+                                data=prompt_paragraph,
+                                file_name="thumbnail_original_prompt.txt",
+                                mime="text/plain"
+                            )
+                        
+                        # Generate variations based on the original prompt
+                        with st.spinner("Generating prompt variations..."):
+                            variations = generate_prompt_variations(openai_client, prompt_paragraph)
+                            
+                            # Split the variations
+                            try:
+                                variation_parts = variations.split("VARIATION")
+                                
+                                # Extract the two variations (skipping the first empty part)
+                                if len(variation_parts) >= 3:
+                                    variation1 = variation_parts[1].replace("1:", "").strip()
+                                    variation2 = variation_parts[2].replace("2:", "").strip()
+                                    
+                                    with prompt_tab2:
+                                        st.subheader("Variation 1")
+                                        st.text_area("Copy this prompt:", value=variation1, height=200, key="variation1")
+                                        st.download_button(
+                                            label="Download Variation 1",
+                                            data=variation1,
+                                            file_name="thumbnail_variation1.txt",
+                                            mime="text/plain"
+                                        )
+                                    
+                                    with prompt_tab3:
+                                        st.subheader("Variation 2")
+                                        st.text_area("Copy this prompt:", value=variation2, height=200, key="variation2")
+                                        st.download_button(
+                                            label="Download Variation 2",
+                                            data=variation2,
+                                            file_name="thumbnail_variation2.txt",
+                                            mime="text/plain"
+                                        )
+                                else:
+                                    # If splitting didn't work as expected
+                                    with prompt_tab2:
+                                        st.markdown("Unable to properly parse variation 1.")
+                                        st.markdown(variations)
+                                    
+                                    with prompt_tab3:
+                                        st.markdown("Unable to properly parse variation 2.")
+                            except Exception as e:
+                                st.error(f"Error parsing variations: {e}")
+                                with prompt_tab2:
+                                    st.markdown("Error generating variations.")
+                                with prompt_tab3:
+                                    st.markdown(variations)
 
 if __name__ == "__main__":
     main()
