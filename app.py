@@ -117,7 +117,7 @@ def encode_image(image_bytes):
 def analyze_with_openai(client, base64_image):
     try:
         response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "user",
@@ -164,7 +164,7 @@ def generate_prompt(client, vision_results, openai_description):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed prompts based on image analysis data."},
                 {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
