@@ -666,7 +666,7 @@ def main():
                     st.write(openai_description)
             
             # Generate prompt paragraph
-            with st.spinner("Generating prompt..."):
+            with st.spinner("Generating prompt and creating new thumbnail..."):
                 prompt_paragraph = generate_prompt_paragraph(
                     openai_client, 
                     vision_results if vision_results else {"no_vision_api": True}, 
@@ -674,51 +674,46 @@ def main():
                 )
                 
                 st.subheader("Generated Prompt")
-                prompt_container = st.container()
-                with prompt_container:
-                    edited_prompt = st.text_area("Edit prompt before generating image:", value=prompt_paragraph, height=150)
+                st.text_area("Thumbnail description:", value=prompt_paragraph, height=150, key="prompt_display")
+                
+                # Automatically generate image from prompt
+                image_urls = generate_image_from_prompt(openai_client, prompt_paragraph)
+                
+                if image_urls:
+                    # Display the generated image
+                    st.subheader("Generated Thumbnail")
+                    st.markdown('<div class="generated-image-container">', unsafe_allow_html=True)
+                    generated_image = download_image(image_urls[0])
+                    if generated_image:
+                        st.image(generated_image, caption="AI-Generated Thumbnail", use_column_width=True)
+                        
+                        # Save generated image to a BytesIO object for download
+                        img_byte_arr = io.BytesIO()
+                        generated_image.save(img_byte_arr, format='PNG')
+                        img_byte_arr.seek(0)
+                        
+                        # Download button for the generated image
+                        st.download_button(
+                            label="Download Generated Thumbnail",
+                            data=img_byte_arr,
+                            file_name="generated_thumbnail.png",
+                            mime="image/png"
+                        )
+                    st.markdown('</div>', unsafe_allow_html=True)
                     
-                    # Generate image button
-                    if st.button("Generate New Thumbnail from Prompt"):
-                        with st.spinner("Generating thumbnail image... (this may take a minute)"):
-                            # Generate image from prompt
-                            image_urls = generate_image_from_prompt(openai_client, edited_prompt)
-                            
-                            if image_urls:
-                                # Display the generated image
-                                st.subheader("Generated Thumbnail")
-                                st.markdown('<div class="generated-image-container">', unsafe_allow_html=True)
-                                generated_image = download_image(image_urls[0])
-                                if generated_image:
-                                    st.image(generated_image, caption="AI-Generated Thumbnail", use_column_width=True)
-                                    
-                                    # Save generated image to a BytesIO object for download
-                                    img_byte_arr = io.BytesIO()
-                                    generated_image.save(img_byte_arr, format='PNG')
-                                    img_byte_arr.seek(0)
-                                    
-                                    # Download button for the generated image
-                                    st.download_button(
-                                        label="Download Generated Thumbnail",
-                                        data=img_byte_arr,
-                                        file_name="generated_thumbnail.png",
-                                        mime="image/png"
-                                    )
-                                st.markdown('</div>', unsafe_allow_html=True)
-                                
-                                # Compare original and generated
-                                st.subheader("Comparison")
-                                cols = st.columns(2)
-                                with cols[0]:
-                                    st.markdown('<div class="thumbnail-container">', unsafe_allow_html=True)
-                                    st.image(image, caption="Original Thumbnail", use_column_width=True)
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                                with cols[1]:
-                                    st.markdown('<div class="generated-image-container">', unsafe_allow_html=True)
-                                    st.image(generated_image, caption="AI-Generated Thumbnail", use_column_width=True)
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                            else:
-                                st.error("Failed to generate image. Please try again.")
+                    # Compare original and generated
+                    st.subheader("Comparison")
+                    cols = st.columns(2)
+                    with cols[0]:
+                        st.markdown('<div class="thumbnail-container">', unsafe_allow_html=True)
+                        st.image(image, caption="Original Thumbnail", use_column_width=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    with cols[1]:
+                        st.markdown('<div class="generated-image-container">', unsafe_allow_html=True)
+                        st.image(generated_image, caption="AI-Generated Thumbnail", use_column_width=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.error("Failed to generate image. Please check your OpenAI API key permissions for DALL-E.")
             
             # Generate prompt variations
             st.subheader("Alternative Prompts")
