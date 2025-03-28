@@ -157,7 +157,10 @@ def setup_credentials():
                     st.warning("Please enter an OpenAI API key to continue.")
         
         if api_key:
+            # Create OpenAI client without the proxies argument
             openai_client = openai.OpenAI(api_key=api_key)
+            # Set the API key directly as well for backward compatibility
+            openai.api_key = api_key
     except Exception as e:
         st.error(f"Error setting up OpenAI API: {e}")
     
