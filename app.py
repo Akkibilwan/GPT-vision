@@ -67,7 +67,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Setup API credentials
+# Set up API credentials.
 def setup_credentials():
     vision_client = None
     try:
@@ -89,7 +89,6 @@ def setup_credentials():
     except Exception as e:
         st.info(f"Google Vision API not available: {e}")
 
-    # Setup OpenAI API key.
     try:
         api_key = None
         if 'OPENAI_API_KEY' in st.secrets:
@@ -180,11 +179,11 @@ def analyze_with_vision(image_bytes, vision_client):
 def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
-# Get a textual description of the image using OpenAI ChatCompletion.
+# Get a textual description of the thumbnail using OpenAI.
 def analyze_with_openai(base64_image):
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "user", "content": f"Analyze this YouTube thumbnail. Describe what you see in detail. [Image: data:image/jpeg;base64,{base64_image}]"}
             ],
@@ -195,24 +194,23 @@ def analyze_with_openai(base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Generate a hyper-realistic image from analysis.
+# Generate a hyper-realistic image prompt from analysis and then create the image.
 def generate_image_from_analysis(vision_results, openai_description):
     try:
-        # Combine analysis data.
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
         }
         analysis_json = json.dumps(input_data, indent=2)
-        # Craft a prompt for image generation that stresses hyper-realism.
         prompt_for_image = (
-            "Based on the following analysis JSON data, create a detailed image description prompt for a hyper realistic, photo-realistic YouTube thumbnail with a 16:9 aspect ratio. "
-            "The prompt should specify the theme, colors, visual elements, and any text elements present. It should instruct the image generation model to produce a hyper realistic, high resolution image. "
+            "Based on the following analysis JSON data, generate a detailed image description prompt for a hyper realistic, photo-realistic YouTube thumbnail with a 16:9 aspect ratio. "
+            "The prompt should specify the theme, colors, visual elements, and any text elements present. "
+            "It must instruct the image generation model to produce a hyper realistic, high resolution image. "
             "Analysis data:\n" + analysis_json
         )
-        # Use GPT-4 to improve the image prompt.
+        # Use GPT-3.5 Turbo to craft the image prompt.
         response_prompt = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are an expert at generating detailed, hyper realistic image prompts."},
                 {"role": "user", "content": prompt_for_image}
@@ -221,11 +219,11 @@ def generate_image_from_analysis(vision_results, openai_description):
         )
         image_prompt = response_prompt.choices[0].message.content.strip()
         
-        # Generate the image using OpenAI's Image API.
+        # Use OpenAI's Image API (DALL·E) to generate the image.
         image_response = openai.Image.create(
             prompt=image_prompt,
             n=1,
-            size="1024x576",  # This size ensures a 16:9 aspect ratio.
+            size="1024x576",  # 16:9 aspect ratio
             response_format="b64_json"
         )
         generated_image_base64 = image_response['data'][0]['b64_json']
@@ -243,7 +241,7 @@ def generate_analysis(vision_results, openai_description):
         }
         prompt = (
             "Based on the provided thumbnail analyses from Google Vision AI and the image description from OpenAI, create a structured analysis covering:\n"
-            "- What's happening in the thumbnail\n"
+            "- What is happening in the thumbnail\n"
             "- Category of video (e.g., gaming, tutorial, vlog)\n"
             "- Theme and mood\n"
             "- Colors used and their significance\n"
@@ -255,7 +253,7 @@ def generate_analysis(vision_results, openai_description):
             "Analysis data:\n" + json.dumps(input_data, indent=2)
         )
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a thumbnail analysis expert who creates detailed analyses based on image data."},
                 {"role": "user", "content": prompt}
@@ -267,7 +265,7 @@ def generate_analysis(vision_results, openai_description):
         st.error(f"Error generating analysis: {e}")
         return None
 
-# Main app function.
+# Main application.
 def main():
     st.markdown(
         '<div style="display: flex; align-items: center; padding: 10px 0;">'
