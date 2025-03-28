@@ -139,7 +139,9 @@ def setup_credentials():
                 if not api_key:
                     st.warning("Please enter an OpenAI API key to continue.")
         if api_key:
-            openai_client = openai.OpenAI(api_key=api_key)
+            # Set the API key for the openai module
+            openai.api_key = api_key
+            openai_client = openai
     except Exception as e:
         st.error(f"Error setting up OpenAI API: {e}")
     
@@ -190,7 +192,7 @@ def analyze_with_vision(image_bytes, vision_client):
     try:
         image = vision.Image(content=image_bytes)
         
-        # Perform different types of detection
+        # Perform various detections
         label_detection = vision_client.label_detection(image=image)
         text_detection = vision_client.text_detection(image=image)
         face_detection = vision_client.face_detection(image=image)
@@ -201,7 +203,7 @@ def analyze_with_vision(image_bytes, vision_client):
             "labels": [{"description": label.description, "score": float(label.score)} 
                       for label in label_detection.label_annotations],
             "text": [{"description": text.description, "confidence": float(text.confidence) if hasattr(text, 'confidence') else None}
-                    for text in text_detection.text_annotations[:1]],  # Just get the full text
+                    for text in text_detection.text_annotations[:1]],
             "faces": [{"joy": face.joy_likelihood.name, 
                        "sorrow": face.sorrow_likelihood.name,
                        "anger": face.anger_likelihood.name,
@@ -229,8 +231,8 @@ def encode_image(image_bytes):
 # Function to analyze image with OpenAI (for a textual description)
 def analyze_with_openai(client, base64_image):
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        response = client.ChatCompletion.create(
+            model="gpt-4",
             messages=[
                 {
                     "role": "user",
@@ -252,34 +254,41 @@ def analyze_with_openai(client, base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Function to generate a YouTube thumbnail image from analysis using GPT-4 image generation
+# Function to generate a YouTube thumbnail image from analysis using GPT to create an image prompt
 def generate_image_from_analysis(client, vision_results, openai_description):
     try:
-        # Prepare input data combining Vision API results and OpenAI's description
+        # Combine analysis data into one structure
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
         }
         
-        prompt = """
-Based on the provided thumbnail analysis JSON data, generate a digital image of a YouTube thumbnail that adheres to the following guidelines:
-- The image must have a 16:9 aspect ratio.
-- It should visually represent the analysis data including themes, colors, visual elements, and emotional cues.
-- Any text elements described should be incorporated with suitable styling.
-- The style should be eye-catching and optimized for a YouTube thumbnail.
-- The output should be a high-resolution image provided as a base64-encoded JPEG.
-
-Analysis data:
-"""
-        response = client.chat.completions.create(
-            model="gpt-4o-imagen",
-            messages=[
-                {"role": "system", "content": "You are a creative image generator that creates high quality YouTube thumbnails based on JSON analysis data."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
-            ],
-            max_tokens=1500
+        # Use GPT-4 to generate a detailed image prompt
+        prompt_for_image = (
+            "Based on the following analysis JSON data, create a detailed image description prompt for a YouTube thumbnail. "
+            "The generated prompt must specify a 16:9 aspect ratio, describe the themes, colors, visual elements, and any text elements, "
+            "so that an image can be generated that matches the analysis. Analysis data:\n" +
+            json.dumps(input_data, indent=2)
         )
-        generated_image_base64 = response.choices[0].message.content.strip()
+        
+        response_prompt = client.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert in creating image generation prompts."},
+                {"role": "user", "content": prompt_for_image}
+            ],
+            max_tokens=300
+        )
+        image_prompt = response_prompt.choices[0].message.content.strip()
+        
+        # Use OpenAI's Image API (DALL·E) to generate an image from the prompt
+        image_response = openai.Image.create(
+            prompt=image_prompt,
+            n=1,
+            size="1024x576",  # This size gives a 16:9 aspect ratio
+            response_format="b64_json"
+        )
+        generated_image_base64 = image_response['data'][0]['b64_json']
         return generated_image_base64
     except Exception as e:
         st.error(f"Error generating image: {e}")
@@ -293,27 +302,26 @@ def generate_analysis(client, vision_results, openai_description):
             "openai_description": openai_description
         }
         
-        prompt = """
-Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a structured analysis covering:
-- What's happening in the thumbnail
-- Category of video (e.g., gaming, tutorial, vlog) 
-- Theme and mood
-- Colors used and their significance
-- Elements and objects present
-- Subject impressions (emotions, expressions)
-- Text present and its purpose
-- Target audience
-
-Format your response with clear headings and bullet points for easy readability.
-
-Analysis data:
-"""
+        prompt = (
+            "Based on the provided thumbnail analyses from Google Vision AI and the image description from OpenAI, "
+            "create a structured analysis covering:\n"
+            "- What's happening in the thumbnail\n"
+            "- Category of video (e.g., gaming, tutorial, vlog)\n"
+            "- Theme and mood\n"
+            "- Colors used and their significance\n"
+            "- Elements and objects present\n"
+            "- Subject impressions (emotions, expressions)\n"
+            "- Text present and its purpose\n"
+            "- Target audience\n\n"
+            "Format your response with clear headings and bullet points for easy readability.\n\n"
+            "Analysis data:\n" + json.dumps(input_data, indent=2)
+        )
         
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        response = client.ChatCompletion.create(
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed analyses based on image analysis data."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+                {"role": "user", "content": prompt}
             ],
             max_tokens=800
         )
@@ -399,7 +407,7 @@ def main():
                 with st.expander("View Raw OpenAI Description"):
                     st.write(openai_description)
         
-        # Instead of generating prompt variations, we now generate an image based on the analysis.
+        # Generate an image from the analysis
         st.subheader("Generated Thumbnail")
         with st.spinner("Generating image from analysis..."):
             generated_image_base64 = generate_image_from_analysis(
