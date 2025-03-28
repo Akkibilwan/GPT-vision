@@ -21,23 +21,11 @@ st.set_page_config(
 # Custom CSS for YouTube-like styling with dark mode
 st.markdown("""
 <style>
-    .main {
-        background-color: #0f0f0f;
-        color: #f1f1f1;
-    }
-    .stApp {
-        background-color: #0f0f0f;
-    }
-    h1, h2, h3 {
-        color: #f1f1f1;
-        font-family: 'Roboto', sans-serif;
-    }
-    p, li, div {
-        color: #aaaaaa;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
+    .main { background-color: #0f0f0f; color: #f1f1f1; }
+    .stApp { background-color: #0f0f0f; }
+    h1, h2, h3 { color: #f1f1f1; font-family: 'Roboto', sans-serif; }
+    p, li, div { color: #aaaaaa; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         background-color: #272727;
         border-radius: 4px 4px 0px 0px;
@@ -45,10 +33,7 @@ st.markdown("""
         font-weight: 500;
         color: #f1f1f1;
     }
-    .stTabs [aria-selected="true"] {
-        background-color: #ff0000;
-        color: white;
-    }
+    .stTabs [aria-selected="true"] { background-color: #ff0000; color: white; }
     .stButton>button {
         background-color: #ff0000;
         color: white;
@@ -73,31 +58,13 @@ st.markdown("""
         padding: 10px;
         background-color: #181818;
     }
-    .stExpander {
-        background-color: #181818;
-        border: 1px solid #303030;
-    }
-    .stAlert {
-        background-color: #181818;
-        color: #f1f1f1;
-    }
-    .stMarkdown {
-        color: #f1f1f1;
-    }
-    /* Fix for radio buttons and other controls */
-    .stRadio label {
-        color: #f1f1f1 !important;
-    }
-    .stSpinner > div {
-        border-top-color: #f1f1f1 !important;
-    }
-    /* Code blocks and JSON display */
-    pre {
-        background-color: #121212 !important;
-    }
-    code {
-        color: #a9dc76 !important;
-    }
+    .stExpander { background-color: #181818; border: 1px solid #303030; }
+    .stAlert { background-color: #181818; color: #f1f1f1; }
+    .stMarkdown { color: #f1f1f1; }
+    .stRadio label { color: #f1f1f1 !important; }
+    .stSpinner > div { border-top-color: #f1f1f1 !important; }
+    pre { background-color: #121212 !important; }
+    code { color: #a9dc76 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -144,12 +111,12 @@ def setup_credentials():
 
     return vision_client
 
-# Function to get YouTube video ID from URL.
+# Function to extract YouTube video ID from URL.
 def extract_video_id(url):
     youtube_regex = (
         r'(https?://)?(www\.)?'
-        '(youtube|youtu|youtube-nocookie)\.(com|be)/'
-        '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})'
+        r'(youtube|youtu|youtube-nocookie)\.(com|be)/'
+        r'(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})'
     )
     youtube_match = re.match(youtube_regex, url)
     if youtube_match:
@@ -218,11 +185,11 @@ def analyze_with_vision(image_bytes, vision_client):
 def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
-# Function to analyze image with OpenAI and get a textual description.
+# Function to analyze image with OpenAI (get a textual description).
 def analyze_with_openai(base64_image):
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
                 {"role": "user", "content": f"Analyze this YouTube thumbnail. Describe what you see in detail. [Image: data:image/jpeg;base64,{base64_image}]"}
             ],
@@ -233,36 +200,32 @@ def analyze_with_openai(base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Function to generate an image from analysis by first creating a detailed image prompt.
+# Function to generate an image from analysis using GPT-4o.
 def generate_image_from_analysis(vision_results, openai_description):
     try:
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
         }
-        prompt_for_image = (
-            "Based on the following analysis JSON data, create a detailed image description prompt for a YouTube thumbnail. "
-            "The generated prompt must specify a 16:9 aspect ratio, describe the themes, colors, visual elements, and any text elements, "
-            "so that an image can be generated that matches the analysis. Analysis data:\n" +
-            json.dumps(input_data, indent=2)
-        )
-        response_prompt = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an expert in creating image generation prompts."},
-                {"role": "user", "content": prompt_for_image}
-            ],
-            max_tokens=300
-        )
-        image_prompt = response_prompt.choices[0].message.content.strip()
+        prompt = """
+Based on the provided thumbnail analysis JSON data, generate a digital image of a YouTube thumbnail that adheres to the following guidelines:
+- The image must have a 16:9 aspect ratio.
+- It should visually represent the analysis data including themes, colors, visual elements, and emotional cues.
+- Any text elements described should be incorporated with suitable styling.
+- The style should be eye-catching and optimized for a YouTube thumbnail.
+- The output must be a high-resolution image provided as a base64-encoded JPEG.
 
-        image_response = openai.Image.create(
-            prompt=image_prompt,
-            n=1,
-            size="1024x576",  # 16:9 aspect ratio
-            response_format="b64_json"
+Analysis data:
+""" + json.dumps(input_data, indent=2)
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a creative image generator that creates high quality YouTube thumbnails based on JSON analysis data."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1500
         )
-        generated_image_base64 = image_response['data'][0]['b64_json']
+        generated_image_base64 = response.choices[0].message.content.strip()
         return generated_image_base64
     except Exception as e:
         st.error(f"Error generating image: {e}")
@@ -289,7 +252,7 @@ def generate_analysis(vision_results, openai_description):
             "Analysis data:\n" + json.dumps(input_data, indent=2)
         )
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed analyses based on image analysis data."},
                 {"role": "user", "content": prompt}
