@@ -144,7 +144,7 @@ def setup_credentials():
     except Exception as e:
         st.info(f"Google Vision API not available: {e}")
     
-    # For OpenAI API
+    # For OpenAI API - Handle both new and old client versions
     try:
         api_key = None
         if 'OPENAI_API_KEY' in st.secrets:
@@ -157,12 +157,28 @@ def setup_credentials():
                     st.warning("Please enter an OpenAI API key to continue.")
         
         if api_key:
-            # Create OpenAI client without the proxies argument
-            openai_client = openai.OpenAI(api_key=api_key)
-            # Set the API key directly as well for backward compatibility
+            # Set global API key for backward compatibility
             openai.api_key = api_key
+            
+            # Try different initialization methods based on library version
+            try:
+                # Method 1: Modern client initialization
+                openai_client = openai.OpenAI(api_key=api_key)
+            except TypeError as e:
+                if 'proxies' in str(e):
+                    # Method 2: Try without any arguments
+                    try:
+                        openai_client = openai.OpenAI()
+                    except Exception:
+                        # Method 3: Just use the global API key
+                        openai_client = openai
+                        st.info("Using legacy OpenAI client")
+                else:
+                    # Some other TypeError
+                    raise
     except Exception as e:
         st.error(f"Error setting up OpenAI API: {e}")
+        st.info("Troubleshooting: Try updating the OpenAI library with 'pip install --upgrade openai'")
     
     return vision_client, openai_client
 
@@ -253,28 +269,55 @@ def encode_image(image_bytes):
 # Function to analyze image with OpenAI
 def analyze_with_openai(client, base64_image):
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Analyze this YouTube thumbnail. Describe what you see in detail."},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
+        # Create payload for analysis
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Analyze this YouTube thumbnail. Describe what you see in detail."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
                         }
-                    ]
-                }
-            ],
-            max_tokens=500
-        )
-        return response.choices[0].message.content
+                    }
+                ]
+            }
+        ]
+        
+        # Try different API calling methods based on the client type
+        try:
+            # Modern client approach
+            if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=500
+                )
+                return response.choices[0].message.content
+            else:
+                # Legacy approach
+                response = client.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=500
+                )
+                return response['choices'][0]['message']['content']
+        except AttributeError:
+            # Fallback if neither method works
+            st.warning("Using OpenAI API with limited vision capabilities. Results may vary.")
+            # Simplified prompt without vision
+            text_prompt = "Analyze a YouTube thumbnail. I'm unable to show you the image, but please provide a generic analysis."
+            response = client.Completion.create(
+                model="gpt-3.5-turbo-instruct",
+                prompt=text_prompt,
+                max_tokens=500
+            )
+            return response['choices'][0]['text']
     except Exception as e:
         st.error(f"Error analyzing image with OpenAI: {e}")
-        return None
+        st.info(f"Error details: {str(e)}")
+        return "Unable to analyze the image. Please check your OpenAI API key and try again."
 
 # Function to analyze image (structured analysis)
 def generate_analysis(client, vision_results, openai_description):
@@ -301,19 +344,44 @@ def generate_analysis(client, vision_results, openai_description):
         Analysis data:
         """
         
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed analyses based on image analysis data."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
-            ],
-            max_tokens=800
-        )
+        # Define messages for the API call
+        messages = [
+            {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed analyses based on image analysis data."},
+            {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+        ]
         
-        return response.choices[0].message.content
+        # Try different API calling methods based on the client type
+        try:
+            # Modern client approach
+            if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=800
+                )
+                return response.choices[0].message.content
+            else:
+                # Legacy approach
+                response = client.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=800
+                )
+                return response['choices'][0]['message']['content']
+        except AttributeError:
+            # Fallback to older API
+            combined_prompt = f"System: You are a thumbnail analysis expert who can create detailed analyses based on image analysis data.\n\nUser: {prompt + json.dumps(input_data, indent=2)}"
+            response = client.Completion.create(
+                model="gpt-3.5-turbo-instruct",
+                prompt=combined_prompt,
+                max_tokens=800
+            )
+            return response['choices'][0]['text']
+            
     except Exception as e:
         st.error(f"Error generating analysis: {e}")
-        return None
+        st.info(f"Error details: {str(e)}")
+        return "Unable to generate analysis. Please check your OpenAI API key and try again."
 
 # Function to generate a specific prompt paragraph
 def generate_prompt_paragraph(client, vision_results, openai_description):
@@ -341,19 +409,44 @@ def generate_prompt_paragraph(client, vision_results, openai_description):
         Analysis data:
         """
         
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
-                {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
-            ],
-            max_tokens=800
-        )
+        # Define messages for the API call
+        messages = [
+            {"role": "system", "content": "You are a thumbnail description expert who creates detailed, specific paragraph descriptions."},
+            {"role": "user", "content": prompt + json.dumps(input_data, indent=2)}
+        ]
         
-        return response.choices[0].message.content
+        # Try different API calling methods based on the client type
+        try:
+            # Modern client approach
+            if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=800
+                )
+                return response.choices[0].message.content
+            else:
+                # Legacy approach
+                response = client.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=800
+                )
+                return response['choices'][0]['message']['content']
+        except AttributeError:
+            # Fallback to older API
+            combined_prompt = f"System: You are a thumbnail description expert who creates detailed, specific paragraph descriptions.\n\nUser: {prompt + json.dumps(input_data, indent=2)}"
+            response = client.Completion.create(
+                model="gpt-3.5-turbo-instruct",
+                prompt=combined_prompt,
+                max_tokens=800
+            )
+            return response['choices'][0]['text']
+            
     except Exception as e:
         st.error(f"Error generating prompt paragraph: {e}")
-        return None
+        st.info(f"Error details: {str(e)}")
+        return "Unable to generate prompt. Please check your OpenAI API key and try again."
 
 # Function to generate images from prompt
 def generate_image_from_prompt(client, prompt, image_count=1):
@@ -363,20 +456,42 @@ def generate_image_from_prompt(client, prompt, image_count=1):
         
         The image should be extremely high quality, photorealistic, and follow YouTube thumbnail best practices with vibrant colors and clear focal points. Make it look professional and eye-catching."""
         
-        response = client.images.generate(
-            model="dall-e-3",  # Using the latest DALL-E model for hyper-realistic images
-            prompt=enhanced_prompt,
-            n=image_count,
-            size="1792x1024",  # YouTube thumbnails are 16:9 aspect ratio
-            quality="hd",
-            style="vivid"  # For more vibrant, eye-catching thumbnails
-        )
-        
-        # Return the URLs of the generated images
-        image_urls = [data.url for data in response.data]
-        return image_urls
+        # Try different API calling methods based on the client type
+        try:
+            # Modern client approach (OpenAI v1.x)
+            if hasattr(client, 'images') and hasattr(client.images, 'generate'):
+                response = client.images.generate(
+                    model="dall-e-3",  # Using the latest DALL-E model for hyper-realistic images
+                    prompt=enhanced_prompt,
+                    n=image_count,
+                    size="1792x1024",  # YouTube thumbnails are 16:9 aspect ratio
+                    quality="hd",
+                    style="vivid"  # For more vibrant, eye-catching thumbnails
+                )
+                
+                # Return the URLs of the generated images
+                image_urls = [data.url for data in response.data]
+                return image_urls
+            else:
+                # Legacy approach (OpenAI v0.x)
+                response = client.Image.create(
+                    prompt=enhanced_prompt,
+                    n=image_count,
+                    size="1792x1024",  # YouTube thumbnails are 16:9 aspect ratio
+                    response_format="url"
+                )
+                
+                # Extract URLs from the response
+                image_urls = [item['url'] for item in response['data']]
+                return image_urls
+        except AttributeError as e:
+            st.error(f"DALL-E API not available in this OpenAI client: {e}")
+            st.info("Try updating the OpenAI library with 'pip install --upgrade openai'")
+            return None
+            
     except Exception as e:
         st.error(f"Error generating images: {e}")
+        st.info(f"Error details: {str(e)}")
         return None
 
 # Function to download image from URL
@@ -410,19 +525,44 @@ def generate_prompt_variations(client, original_prompt):
         Label them clearly as "VARIATION 1:" and "VARIATION 2:" and make them distinctly different from each other and from the original.
         """
         
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a creative thumbnail designer who creates varied but purposeful alternatives."},
-                {"role": "user", "content": variation_prompt}
-            ],
-            max_tokens=1200
-        )
+        # Define messages for the API call
+        messages = [
+            {"role": "system", "content": "You are a creative thumbnail designer who creates varied but purposeful alternatives."},
+            {"role": "user", "content": variation_prompt}
+        ]
         
-        return response.choices[0].message.content
+        # Try different API calling methods based on the client type
+        try:
+            # Modern client approach
+            if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=1200
+                )
+                return response.choices[0].message.content
+            else:
+                # Legacy approach
+                response = client.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=1200
+                )
+                return response['choices'][0]['message']['content']
+        except AttributeError:
+            # Fallback to older API
+            combined_prompt = f"System: You are a creative thumbnail designer who creates varied but purposeful alternatives.\n\nUser: {variation_prompt}"
+            response = client.Completion.create(
+                model="gpt-3.5-turbo-instruct",
+                prompt=combined_prompt,
+                max_tokens=1200
+            )
+            return response['choices'][0]['text']
+            
     except Exception as e:
         st.error(f"Error generating prompt variations: {e}")
-        return None
+        st.info(f"Error details: {str(e)}")
+        return "VARIATION 1: Unable to generate variations. Please check your OpenAI API key and try again.\n\nVARIATION 2: Unable to generate variations. Please check your OpenAI API key and try again."
 
 # Main app
 def main():
