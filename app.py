@@ -13,7 +13,7 @@ import base64
 # Set page configuration
 st.set_page_config(
     page_title="YouTube Thumbnail Analyzer",
-    page_icon="\ud83c\udfac",
+    page_icon="🎬",
     layout="wide"
 )
 
@@ -98,7 +98,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Setup API credentials
+# Setup credentials
+
 def setup_credentials():
     vision_client = None
     openai.api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -116,13 +117,13 @@ def setup_credentials():
 
     return vision_client
 
-# Extract video ID from YouTube URL
+# YouTube helpers
+
 def extract_video_id(url):
     pattern = r'(?:v=|youtu.be/|embed/)([\w-]{11})'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
-# Get thumbnail URL from video ID
 def get_thumbnail_url(video_id):
     urls = [
         f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
@@ -133,7 +134,6 @@ def get_thumbnail_url(video_id):
             return url
     return None
 
-# Download thumbnail image
 def download_thumbnail(url):
     try:
         response = requests.get(url)
@@ -142,7 +142,8 @@ def download_thumbnail(url):
         st.error(f"Download error: {e}")
         return None
 
-# Analyze with Google Vision API
+# Vision API analysis
+
 def analyze_with_vision(image_bytes, client):
     try:
         image = vision.Image(content=image_bytes)
@@ -172,7 +173,8 @@ def analyze_with_vision(image_bytes, client):
         st.error(f"Vision API error: {e}")
         return {}
 
-# Generate image using GPT-4o image generation
+# GPT-4o Image generation
+
 def generate_image_from_analysis(vision_results):
     try:
         prompt = f"""
@@ -198,9 +200,10 @@ def generate_image_from_analysis(vision_results):
         st.error(f"Image generation error: {e}")
         return None
 
-# Main app logic
+# Main app
+
 def main():
-    st.markdown('<div style="display: flex; align-items: center; padding: 10px 0;"><span style="color: #FF0000; font-size: 28px; font-weight: bold; margin-right: 5px;">\u25b6\ufe0f</span> <h1 style="margin: 0; color: #f1f1f1;">YouTube Thumbnail Analyzer</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div style="display: flex; align-items: center; padding: 10px 0;"><span style="color: #FF0000; font-size: 28px; font-weight: bold; margin-right: 5px;">▶️</span> <h1 style="margin: 0; color: #f1f1f1;">YouTube Thumbnail Analyzer</h1></div>', unsafe_allow_html=True)
     st.markdown('<p style="color: #aaaaaa; margin-top: 0;">Upload a thumbnail or paste a YouTube URL. Get AI-generated suggestions based on Vision + GPT-4o.</p>', unsafe_allow_html=True)
 
     vision_client = setup_credentials()
@@ -211,7 +214,6 @@ def main():
     input_option = st.radio("Select input method:", ["Upload Image", "YouTube URL"], horizontal=True)
     image_bytes = None
     image = None
-    video_info = {}
 
     if input_option == "Upload Image":
         uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
