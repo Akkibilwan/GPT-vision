@@ -9,7 +9,6 @@ from google.cloud import vision
 from google.oauth2 import service_account
 import openai
 import base64
-import time
 
 # Set page configuration
 st.set_page_config(
@@ -18,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for YouTube-like styling with dark mode
+# Custom CSS for YouTube-like dark mode styling
 st.markdown("""
 <style>
     .main { background-color: #0f0f0f; color: #f1f1f1; }
@@ -68,11 +67,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Function to set up API credentials.
+# Setup API credentials
 def setup_credentials():
     vision_client = None
-
-    # Setup Google Vision API credentials.
     try:
         if 'GOOGLE_CREDENTIALS' in st.secrets:
             credentials_dict = st.secrets["GOOGLE_CREDENTIALS"]
@@ -80,20 +77,19 @@ def setup_credentials():
                 credentials_dict = json.loads(credentials_dict)
             credentials = service_account.Credentials.from_service_account_info(credentials_dict)
             vision_client = vision.ImageAnnotatorClient(credentials=credentials)
+        elif os.path.exists("service-account.json"):
+            credentials = service_account.Credentials.from_service_account_file("service-account.json")
+            vision_client = vision.ImageAnnotatorClient(credentials=credentials)
         else:
-            if os.path.exists("service-account.json"):
-                credentials = service_account.Credentials.from_service_account_file("service-account.json")
-                vision_client = vision.ImageAnnotatorClient(credentials=credentials)
+            credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            if credentials_path and os.path.exists(credentials_path):
+                vision_client = vision.ImageAnnotatorClient()
             else:
-                credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-                if credentials_path and os.path.exists(credentials_path):
-                    vision_client = vision.ImageAnnotatorClient()
-                else:
-                    st.info("Google Vision API credentials not found. Analysis will use only OpenAI.")
+                st.info("Google Vision API credentials not found. Analysis will use only OpenAI.")
     except Exception as e:
         st.info(f"Google Vision API not available: {e}")
 
-    # Setup OpenAI API credentials.
+    # Setup OpenAI API key.
     try:
         api_key = None
         if 'OPENAI_API_KEY' in st.secrets:
@@ -111,7 +107,7 @@ def setup_credentials():
 
     return vision_client
 
-# Function to extract YouTube video ID from URL.
+# Extract YouTube video ID from URL.
 def extract_video_id(url):
     youtube_regex = (
         r'(https?://)?(www\.)?'
@@ -123,7 +119,7 @@ def extract_video_id(url):
         return youtube_match.group(6)
     return None
 
-# Function to get thumbnail URL from video ID.
+# Get thumbnail URL from video ID.
 def get_thumbnail_url(video_id):
     thumbnail_urls = [
         f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
@@ -137,19 +133,18 @@ def get_thumbnail_url(video_id):
             return url
     return None
 
-# Function to download thumbnail from URL.
+# Download thumbnail from URL.
 def download_thumbnail(url):
     try:
         response = requests.get(url, stream=True)
         if response.status_code == 200:
             return response.content
-        else:
-            return None
+        return None
     except Exception as e:
         st.error(f"Error downloading thumbnail: {e}")
         return None
 
-# Function to analyze image with Google Vision API.
+# Analyze image with Google Vision API.
 def analyze_with_vision(image_bytes, vision_client):
     try:
         image = vision.Image(content=image_bytes)
@@ -181,15 +176,15 @@ def analyze_with_vision(image_bytes, vision_client):
         st.error(f"Error analyzing image with Google Vision API: {e}")
         return None
 
-# Function to encode image to base64.
+# Encode image to base64.
 def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
-# Function to analyze image with OpenAI (get a textual description).
+# Get a textual description of the image using OpenAI ChatCompletion.
 def analyze_with_openai(base64_image):
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[
                 {"role": "user", "content": f"Analyze this YouTube thumbnail. Describe what you see in detail. [Image: data:image/jpeg;base64,{base64_image}]"}
             ],
@@ -200,38 +195,46 @@ def analyze_with_openai(base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Function to generate an image from analysis using GPT-4o.
+# Generate a hyper-realistic image from analysis.
 def generate_image_from_analysis(vision_results, openai_description):
     try:
+        # Combine analysis data.
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
         }
-        prompt = """
-Based on the provided thumbnail analysis JSON data, generate a digital image of a YouTube thumbnail that adheres to the following guidelines:
-- The image must have a 16:9 aspect ratio.
-- It should visually represent the analysis data including themes, colors, visual elements, and emotional cues.
-- Any text elements described should be incorporated with suitable styling.
-- The style should be eye-catching and optimized for a YouTube thumbnail.
-- The output must be a high-resolution image provided as a base64-encoded JPEG.
-
-Analysis data:
-""" + json.dumps(input_data, indent=2)
-        response = openai.ChatCompletion.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a creative image generator that creates high quality YouTube thumbnails based on JSON analysis data."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1500
+        analysis_json = json.dumps(input_data, indent=2)
+        # Craft a prompt for image generation that stresses hyper-realism.
+        prompt_for_image = (
+            "Based on the following analysis JSON data, create a detailed image description prompt for a hyper realistic, photo-realistic YouTube thumbnail with a 16:9 aspect ratio. "
+            "The prompt should specify the theme, colors, visual elements, and any text elements present. It should instruct the image generation model to produce a hyper realistic, high resolution image. "
+            "Analysis data:\n" + analysis_json
         )
-        generated_image_base64 = response.choices[0].message.content.strip()
+        # Use GPT-4 to improve the image prompt.
+        response_prompt = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert at generating detailed, hyper realistic image prompts."},
+                {"role": "user", "content": prompt_for_image}
+            ],
+            max_tokens=300
+        )
+        image_prompt = response_prompt.choices[0].message.content.strip()
+        
+        # Generate the image using OpenAI's Image API.
+        image_response = openai.Image.create(
+            prompt=image_prompt,
+            n=1,
+            size="1024x576",  # This size ensures a 16:9 aspect ratio.
+            response_format="b64_json"
+        )
+        generated_image_base64 = image_response['data'][0]['b64_json']
         return generated_image_base64
     except Exception as e:
         st.error(f"Error generating image: {e}")
         return None
 
-# Function to generate a structured analysis using OpenAI.
+# Generate structured analysis using OpenAI.
 def generate_analysis(vision_results, openai_description):
     try:
         input_data = {
@@ -252,9 +255,9 @@ def generate_analysis(vision_results, openai_description):
             "Analysis data:\n" + json.dumps(input_data, indent=2)
         )
         response = openai.ChatCompletion.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are a thumbnail analysis expert who can create detailed analyses based on image analysis data."},
+                {"role": "system", "content": "You are a thumbnail analysis expert who creates detailed analyses based on image data."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=800
@@ -264,7 +267,7 @@ def generate_analysis(vision_results, openai_description):
         st.error(f"Error generating analysis: {e}")
         return None
 
-# Main application.
+# Main app function.
 def main():
     st.markdown(
         '<div style="display: flex; align-items: center; padding: 10px 0;">'
@@ -276,7 +279,6 @@ def main():
     st.markdown('<p style="color: #aaaaaa; margin-top: 0;">Analyze thumbnails using AI to understand what makes them effective</p>', unsafe_allow_html=True)
     
     vision_client = setup_credentials()
-    
     if not openai.api_key:
         st.error("OpenAI API key not initialized. Please check your API key.")
         return
@@ -298,7 +300,7 @@ def main():
             img_byte_arr = io.BytesIO()
             image.save(img_byte_arr, format=image.format if image.format else 'JPEG')
             image_bytes = img_byte_arr.getvalue()
-    else:  # YouTube URL
+    else:
         youtube_url = st.text_input("Enter YouTube video URL:", placeholder="https://www.youtube.com/watch?v=...")
         if youtube_url:
             video_id = extract_video_id(youtube_url)
@@ -344,7 +346,7 @@ def main():
                     st.write(openai_description)
         
         st.subheader("Generated Thumbnail")
-        with st.spinner("Generating image from analysis..."):
+        with st.spinner("Generating hyper realistic image from analysis..."):
             generated_image_base64 = generate_image_from_analysis(
                 vision_results if vision_results else {"no_vision_api": True},
                 openai_description
@@ -352,7 +354,7 @@ def main():
             if generated_image_base64:
                 generated_image_bytes = base64.b64decode(generated_image_base64)
                 generated_image = Image.open(io.BytesIO(generated_image_bytes))
-                st.image(generated_image, caption="Generated Thumbnail", use_column_width=True)
+                st.image(generated_image, caption="Generated Hyper Realistic Thumbnail", use_column_width=True)
 
 if __name__ == "__main__":
     main()
