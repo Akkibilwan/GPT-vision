@@ -145,6 +145,9 @@ def download_thumbnail(url):
 # Vision API analysis
 
 def analyze_with_vision(image_bytes, client):
+    if not client:
+        st.error("Google Vision client not initialized.")
+        return {}
     try:
         image = vision.Image(content=image_bytes)
         label_response = client.label_detection(image=image)
@@ -179,7 +182,7 @@ def generate_image_from_analysis(vision_results):
     try:
         prompt = f"""
         Create a YouTube thumbnail with:
-        - Aspect ratio 16:9 (1280x720 resolution)
+        - Wide aspect ratio, suited for YouTube (horizontal layout)
         - Based on this analysis:
         {json.dumps(vision_results, indent=2)}
         - No text unless mentioned
@@ -191,7 +194,7 @@ def generate_image_from_analysis(vision_results):
             model="dall-e-3",
             prompt=prompt,
             n=1,
-            size="1280x720"
+            size="1024x1024"
         )
 
         return response.data[0].url if response and response.data else None
