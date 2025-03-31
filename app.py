@@ -8,6 +8,7 @@ from PIL import Image
 from google.cloud import vision
 from google.oauth2 import service_account
 import openai
+from openai import ChatCompletion, Image as OpenAIImage
 import base64
 
 # Set page configuration
@@ -182,7 +183,7 @@ def encode_image(image_bytes):
 # Get a textual description of the thumbnail using OpenAI.
 def analyze_with_openai(base64_image):
     try:
-        response = openai.ChatCompletion.create(
+        response = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "user", "content": f"Analyze this YouTube thumbnail. Describe what you see in detail. [Image: data:image/jpeg;base64,{base64_image}]"}
@@ -207,11 +208,11 @@ def generate_image_from_analysis(vision_results, openai_description):
             "- The image must have a 16:9 aspect ratio.\n"
             "- It should be highly detailed, photorealistic, and contextually accurate.\n"
             "- Visual elements, colors, textures, lighting, and any text elements must be rendered precisely as described in the analysis.\n"
-            "- The output should be returned as a base64-encoded JPEG image.\n\n"
+            "- The output must be returned as a base64-encoded JPEG image.\n\n"
             "Analysis data:\n" + analysis_json
         )
         # Use ChatGPT-4o for image generation.
-        response = openai.ChatCompletion.create(
+        response = ChatCompletion.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a state-of-the-art image generator capable of producing photorealistic images with precision and contextually accurate details."},
@@ -245,7 +246,7 @@ def generate_analysis(vision_results, openai_description):
             "Format your response with clear headings and bullet points for easy readability.\n\n"
             "Analysis data:\n" + json.dumps(input_data, indent=2)
         )
-        response = openai.ChatCompletion.create(
+        response = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a thumbnail analysis expert who creates detailed analyses based on image data."},
