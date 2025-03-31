@@ -67,7 +67,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Function to set up API credentials
+# Setup API credentials.
 def setup_credentials():
     vision_client = None
     try:
@@ -106,7 +106,7 @@ def setup_credentials():
 
     return vision_client
 
-# Extract YouTube video ID from URL
+# Extract YouTube video ID from URL.
 def extract_video_id(url):
     youtube_regex = (
         r'(https?://)?(www\.)?'
@@ -118,7 +118,7 @@ def extract_video_id(url):
         return youtube_match.group(6)
     return None
 
-# Get thumbnail URL from video ID
+# Get thumbnail URL from video ID.
 def get_thumbnail_url(video_id):
     thumbnail_urls = [
         f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
@@ -132,7 +132,7 @@ def get_thumbnail_url(video_id):
             return url
     return None
 
-# Download thumbnail from URL
+# Download thumbnail from URL.
 def download_thumbnail(url):
     try:
         response = requests.get(url, stream=True)
@@ -143,7 +143,7 @@ def download_thumbnail(url):
         st.error(f"Error downloading thumbnail: {e}")
         return None
 
-# Analyze image using Google Vision API
+# Analyze image using Google Vision API.
 def analyze_with_vision(image_bytes, vision_client):
     try:
         image = vision.Image(content=image_bytes)
@@ -175,11 +175,11 @@ def analyze_with_vision(image_bytes, vision_client):
         st.error(f"Error analyzing image with Google Vision API: {e}")
         return None
 
-# Encode image to base64
+# Encode image to base64.
 def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
-# Get a textual description of the thumbnail using OpenAI
+# Get a textual description of the thumbnail using OpenAI.
 def analyze_with_openai(base64_image):
     try:
         response = openai.ChatCompletion.create(
@@ -310,7 +310,7 @@ def main():
         col1, col2 = st.columns([1, 2])
         with col1:
             st.markdown('<div class="thumbnail-container">', unsafe_allow_html=True)
-            st.image(image, caption="Thumbnail" if input_option == "Upload Image" else video_info.get("title", "YouTube Thumbnail"), use_column_width=True)
+            st.image(image, caption="Thumbnail" if input_option == "Upload Image" else video_info.get("title", "YouTube Thumbnail"), use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
             if input_option == "YouTube URL" and "id" in video_info:
                 st.markdown(f'<a href="{video_info["url"]}" target="_blank" style="color: #3ea6ff; text-decoration: none; font-weight: 500;">View Original Video</a>', unsafe_allow_html=True)
@@ -341,7 +341,7 @@ def main():
             if generated_image_base64:
                 generated_image_bytes = base64.b64decode(generated_image_base64)
                 generated_image = Image.open(io.BytesIO(generated_image_bytes))
-                st.image(generated_image, caption="Generated Photorealistic Thumbnail", use_column_width=True)
+                st.image(generated_image, caption="Generated Photorealistic Thumbnail", use_container_width=True)
 
 if __name__ == "__main__":
     main()
