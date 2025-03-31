@@ -8,7 +8,7 @@ from PIL import Image
 from google.cloud import vision
 from google.oauth2 import service_account
 import openai
-from openai import ChatCompletion, Image as OpenAIImage
+from openai import OpenAI
 import base64
 
 # Set page configuration
@@ -90,8 +90,8 @@ def setup_credentials():
     except Exception as e:
         st.info(f"Google Vision API not available: {e}")
 
+    api_key = None
     try:
-        api_key = None
         if 'OPENAI_API_KEY' in st.secrets:
             api_key = st.secrets["OPENAI_API_KEY"]
         else:
@@ -101,11 +101,14 @@ def setup_credentials():
                 if not api_key:
                     st.warning("Please enter an OpenAI API key to continue.")
         if api_key:
-            openai.api_key = api_key
+            os.environ["OPENAI_API_KEY"] = api_key
+            openai_client = OpenAI() # Initialize OpenAI client here
+            return vision_client, openai_client
     except Exception as e:
         st.error(f"Error setting up OpenAI API: {e}")
+        return vision_client, None
 
-    return vision_client
+    return vision_client, None # Return None if OpenAI initialization fails
 
 # Extract YouTube video ID from URL.
 def extract_video_id(url):
@@ -181,9 +184,9 @@ def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
 # Get a textual description of the thumbnail using OpenAI.
-def analyze_with_openai(base64_image):
+def analyze_with_openai(base64_image, openai_client):
     try:
-        response = ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "user", "content": f"Analyze this YouTube thumbnail. Describe what you see in detail. [Image: data:image/jpeg;base64,{base64_image}]"}
@@ -196,7 +199,7 @@ def analyze_with_openai(base64_image):
         return None
 
 # Generate a photorealistic image using the latest ChatGPT-4o image generation model.
-def generate_image_from_analysis(vision_results, openai_description):
+def generate_image_from_analysis(vision_results, openai_description, openai_client):
     try:
         input_data = {
             "vision_analysis": vision_results,
@@ -212,7 +215,7 @@ def generate_image_from_analysis(vision_results, openai_description):
             "Analysis data:\n" + analysis_json
         )
         # Use ChatGPT-4o for image generation.
-        response = ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a state-of-the-art image generator capable of producing photorealistic images with precision and contextually accurate details."},
@@ -227,7 +230,7 @@ def generate_image_from_analysis(vision_results, openai_description):
         return None
 
 # Generate structured analysis using OpenAI.
-def generate_analysis(vision_results, openai_description):
+def generate_analysis(vision_results, openai_description, openai_client):
     try:
         input_data = {
             "vision_analysis": vision_results,
@@ -246,7 +249,7 @@ def generate_analysis(vision_results, openai_description):
             "Format your response with clear headings and bullet points for easy readability.\n\n"
             "Analysis data:\n" + json.dumps(input_data, indent=2)
         )
-        response = ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a thumbnail analysis expert who creates detailed analyses based on image data."},
@@ -269,18 +272,19 @@ def main():
         unsafe_allow_html=True
     )
     st.markdown('<p style="color: #aaaaaa; margin-top: 0;">Analyze thumbnails using AI to understand what makes them effective</p>', unsafe_allow_html=True)
-    
-    vision_client = setup_credentials()
-    if not openai.api_key:
-        st.error("OpenAI API key not initialized. Please check your API key.")
+
+    vision_client, openai_client = setup_credentials()
+
+    if not openai_client:
+        st.error("OpenAI API key not initialized or invalid. Please check your API key.")
         return
 
     input_option = st.radio("Select input method:", ["Upload Image", "YouTube URL"], horizontal=True)
-    
+
     image_bytes = None
     image = None
     video_info = {}
-    
+
     if input_option == "Upload Image":
         uploaded_file = st.file_uploader("Choose a thumbnail image...", type=["jpg", "jpeg", "png"])
         if uploaded_file is not None:
@@ -306,7 +310,7 @@ def main():
                     st.error("Could not retrieve thumbnail for this video.")
             else:
                 st.error("Invalid YouTube URL. Please enter a valid YouTube video URL.")
-    
+
     if image_bytes and image:
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -315,29 +319,30 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
             if input_option == "YouTube URL" and "id" in video_info:
                 st.markdown(f'<a href="{video_info["url"]}" target="_blank" style="color: #3ea6ff; text-decoration: none; font-weight: 500;">View Original Video</a>', unsafe_allow_html=True)
-        
+
         with st.spinner("Analyzing thumbnail..."):
             base64_image = encode_image(image_bytes)
-            openai_description = analyze_with_openai(base64_image)
+            openai_description = analyze_with_openai(base64_image, openai_client)
             vision_results = None
             if vision_client:
                 vision_results = analyze_with_vision(image_bytes, vision_client)
-            
+
             with col2:
                 st.subheader("Thumbnail Analysis")
-                analysis = generate_analysis(vision_results if vision_results else {"no_vision_api": True}, openai_description)
+                analysis = generate_analysis(vision_results if vision_results else {"no_vision_api": True}, openai_description, openai_client)
                 st.markdown(analysis)
                 if vision_results:
                     with st.expander("View Raw Vision API Results"):
                         st.json(vision_results)
                 with st.expander("View Raw OpenAI Description"):
                     st.write(openai_description)
-        
+
         st.subheader("Generated Thumbnail")
         with st.spinner("Generating photorealistic image from analysis..."):
             generated_image_base64 = generate_image_from_analysis(
                 vision_results if vision_results else {"no_vision_api": True},
-                openai_description
+                openai_description,
+                openai_client
             )
             if generated_image_base64:
                 generated_image_bytes = base64.b64decode(generated_image_base64)
