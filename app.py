@@ -17,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for YouTube-like dark mode styling
+# Custom CSS for dark mode styling
 st.markdown("""
 <style>
     .main { background-color: #0f0f0f; color: #f1f1f1; }
@@ -67,7 +67,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Setup API credentials.
+# Setup API credentials (Google Vision and OpenAI).
 def setup_credentials():
     vision_client = None
     try:
@@ -179,7 +179,7 @@ def analyze_with_vision(image_bytes, vision_client):
 def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
-# Get a textual description of the thumbnail using OpenAI.
+# Use OpenAI to get a detailed textual description of the thumbnail.
 def analyze_with_openai(base64_image):
     try:
         response = openai.ChatCompletion.create(
@@ -197,7 +197,7 @@ def analyze_with_openai(base64_image):
 # Generate a photorealistic image using the latest GPT-4o image generation model.
 def generate_image_from_analysis(vision_results, openai_description):
     try:
-        # Combine the analysis data
+        # Combine analysis data into one JSON structure.
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
@@ -218,13 +218,14 @@ def generate_image_from_analysis(vision_results, openai_description):
             ],
             max_tokens=1500
         )
+        # Expect the model's reply to be a base64-encoded JPEG string.
         generated_image_base64 = response.choices[0].message.content.strip()
         return generated_image_base64
     except Exception as e:
         st.error(f"Error generating image: {e}")
         return None
 
-# Generate structured analysis using OpenAI.
+# Generate a structured analysis using OpenAI.
 def generate_analysis(vision_results, openai_description):
     try:
         input_data = {
@@ -257,7 +258,7 @@ def generate_analysis(vision_results, openai_description):
         st.error(f"Error generating analysis: {e}")
         return None
 
-# Main application.
+# Main app.
 def main():
     st.markdown(
         '<div style="display: flex; align-items: center; padding: 10px 0;">'
@@ -273,11 +274,7 @@ def main():
         st.error("OpenAI API key not initialized. Please check your API key.")
         return
 
-    input_option = st.radio(
-        "Select input method:",
-        ["Upload Image", "YouTube URL"],
-        horizontal=True
-    )
+    input_option = st.radio("Select input method:", ["Upload Image", "YouTube URL"], horizontal=True)
     
     image_bytes = None
     image = None
@@ -321,9 +318,7 @@ def main():
         with st.spinner("Analyzing thumbnail..."):
             base64_image = encode_image(image_bytes)
             openai_description = analyze_with_openai(base64_image)
-            vision_results = None
-            if vision_client:
-                vision_results = analyze_with_vision(image_bytes, vision_client)
+            vision_results = vision_results = analyze_with_vision(image_bytes, vision_client) if vision_client else None
             
             with col2:
                 st.subheader("Thumbnail Analysis")
@@ -337,10 +332,7 @@ def main():
         
         st.subheader("Generated Thumbnail")
         with st.spinner("Generating photorealistic image using GPT-4o..."):
-            generated_image_base64 = generate_image_from_analysis(
-                vision_results if vision_results else {"no_vision_api": True},
-                openai_description
-            )
+            generated_image_base64 = generate_image_from_analysis(vision_results if vision_results else {"no_vision_api": True}, openai_description)
             if generated_image_base64:
                 generated_image_bytes = base64.b64decode(generated_image_base64)
                 generated_image = Image.open(io.BytesIO(generated_image_bytes))
