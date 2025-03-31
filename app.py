@@ -17,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for dark mode styling
+# Custom CSS for dark mode (YouTube-like)
 st.markdown("""
 <style>
     .main { background-color: #0f0f0f; color: #f1f1f1; }
@@ -27,7 +27,7 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         background-color: #272727;
-        border-radius: 4px 4px 0px 0px;
+        border-radius: 4px 4px 0 0;
         padding: 10px 16px;
         font-weight: 500;
         color: #f1f1f1;
@@ -67,7 +67,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Setup API credentials (Google Vision and OpenAI).
+# Function to set up API credentials
 def setup_credentials():
     vision_client = None
     try:
@@ -106,7 +106,7 @@ def setup_credentials():
 
     return vision_client
 
-# Extract YouTube video ID from URL.
+# Extract YouTube video ID from URL
 def extract_video_id(url):
     youtube_regex = (
         r'(https?://)?(www\.)?'
@@ -118,7 +118,7 @@ def extract_video_id(url):
         return youtube_match.group(6)
     return None
 
-# Get thumbnail URL from video ID.
+# Get thumbnail URL from video ID
 def get_thumbnail_url(video_id):
     thumbnail_urls = [
         f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
@@ -132,7 +132,7 @@ def get_thumbnail_url(video_id):
             return url
     return None
 
-# Download thumbnail from URL.
+# Download thumbnail from URL
 def download_thumbnail(url):
     try:
         response = requests.get(url, stream=True)
@@ -143,7 +143,7 @@ def download_thumbnail(url):
         st.error(f"Error downloading thumbnail: {e}")
         return None
 
-# Analyze image with Google Vision API.
+# Analyze image using Google Vision API
 def analyze_with_vision(image_bytes, vision_client):
     try:
         image = vision.Image(content=image_bytes)
@@ -175,11 +175,11 @@ def analyze_with_vision(image_bytes, vision_client):
         st.error(f"Error analyzing image with Google Vision API: {e}")
         return None
 
-# Encode image to base64.
+# Encode image to base64
 def encode_image(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
-# Use OpenAI to get a detailed textual description of the thumbnail.
+# Get a textual description of the thumbnail using OpenAI
 def analyze_with_openai(base64_image):
     try:
         response = openai.ChatCompletion.create(
@@ -194,38 +194,38 @@ def analyze_with_openai(base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Generate a photorealistic image using the latest GPT-4o image generation model.
+# Generate a photorealistic image using the latest ChatGPT-4o image generation model.
 def generate_image_from_analysis(vision_results, openai_description):
     try:
-        # Combine analysis data into one JSON structure.
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
         }
         analysis_json = json.dumps(input_data, indent=2)
         prompt = (
-            "Based on the following analysis JSON data, generate a photorealistic digital image of a YouTube thumbnail. "
-            "The image must have a 16:9 aspect ratio, be highly detailed and contextually accurate, and incorporate the themes, colors, "
-            "visual elements, and any text described in the analysis. The output must be a high-resolution image provided as a base64-encoded JPEG.\n\n"
+            "Based on the provided analysis JSON data, generate a photorealistic digital image of a YouTube thumbnail that meets the following criteria:\n"
+            "- The image must have a 16:9 aspect ratio.\n"
+            "- It should be highly detailed, photorealistic, and contextually accurate.\n"
+            "- Visual elements, colors, textures, lighting, and any text elements must be rendered precisely as described in the analysis.\n"
+            "- The output should be returned as a base64-encoded JPEG image.\n\n"
             "Analysis data:\n" + analysis_json
         )
-        # Call GPT-4o image generation via the ChatCompletion endpoint.
+        # Use ChatGPT-4o for image generation.
         response = openai.ChatCompletion.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a state-of-the-art image generation model that produces photorealistic images with precision and contextually accurate details."},
+                {"role": "system", "content": "You are a state-of-the-art image generator capable of producing photorealistic images with precision and contextually accurate details."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1500
         )
-        # Expect the model's reply to be a base64-encoded JPEG string.
         generated_image_base64 = response.choices[0].message.content.strip()
         return generated_image_base64
     except Exception as e:
         st.error(f"Error generating image: {e}")
         return None
 
-# Generate a structured analysis using OpenAI.
+# Generate structured analysis using OpenAI.
 def generate_analysis(vision_results, openai_description):
     try:
         input_data = {
@@ -258,7 +258,7 @@ def generate_analysis(vision_results, openai_description):
         st.error(f"Error generating analysis: {e}")
         return None
 
-# Main app.
+# Main application.
 def main():
     st.markdown(
         '<div style="display: flex; align-items: center; padding: 10px 0;">'
@@ -318,7 +318,9 @@ def main():
         with st.spinner("Analyzing thumbnail..."):
             base64_image = encode_image(image_bytes)
             openai_description = analyze_with_openai(base64_image)
-            vision_results = vision_results = analyze_with_vision(image_bytes, vision_client) if vision_client else None
+            vision_results = None
+            if vision_client:
+                vision_results = analyze_with_vision(image_bytes, vision_client)
             
             with col2:
                 st.subheader("Thumbnail Analysis")
@@ -331,8 +333,11 @@ def main():
                     st.write(openai_description)
         
         st.subheader("Generated Thumbnail")
-        with st.spinner("Generating photorealistic image using GPT-4o..."):
-            generated_image_base64 = generate_image_from_analysis(vision_results if vision_results else {"no_vision_api": True}, openai_description)
+        with st.spinner("Generating photorealistic image from analysis..."):
+            generated_image_base64 = generate_image_from_analysis(
+                vision_results if vision_results else {"no_vision_api": True},
+                openai_description
+            )
             if generated_image_base64:
                 generated_image_bytes = base64.b64decode(generated_image_base64)
                 generated_image = Image.open(io.BytesIO(generated_image_bytes))
