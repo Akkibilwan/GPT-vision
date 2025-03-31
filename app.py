@@ -194,39 +194,31 @@ def analyze_with_openai(base64_image):
         st.error(f"Error analyzing image with OpenAI: {e}")
         return None
 
-# Generate a hyper-realistic image from analysis using DALL-E 3.
+# Generate a photorealistic image using the latest GPT-4o image generation model.
 def generate_image_from_analysis(vision_results, openai_description):
     try:
+        # Combine the analysis data
         input_data = {
             "vision_analysis": vision_results,
             "openai_description": openai_description
         }
         analysis_json = json.dumps(input_data, indent=2)
-        prompt_for_image = (
-            "Based on the following analysis JSON data, generate a detailed image description prompt for a hyper realistic, photo-realistic YouTube thumbnail with a 16:9 aspect ratio. "
-            "The prompt should specify the theme, colors, visual elements, and any text elements present, and instruct the image generation model to produce a hyper realistic, high resolution image. "
+        prompt = (
+            "Based on the following analysis JSON data, generate a photorealistic digital image of a YouTube thumbnail. "
+            "The image must have a 16:9 aspect ratio, be highly detailed and contextually accurate, and incorporate the themes, colors, "
+            "visual elements, and any text described in the analysis. The output must be a high-resolution image provided as a base64-encoded JPEG.\n\n"
             "Analysis data:\n" + analysis_json
         )
-        # Use GPT-3.5 Turbo to craft the image prompt.
-        response_prompt = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        # Call GPT-4o image generation via the ChatCompletion endpoint.
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are an expert at generating detailed, hyper realistic image prompts."},
-                {"role": "user", "content": prompt_for_image}
+                {"role": "system", "content": "You are a state-of-the-art image generation model that produces photorealistic images with precision and contextually accurate details."},
+                {"role": "user", "content": prompt}
             ],
-            max_tokens=300
+            max_tokens=1500
         )
-        image_prompt = response_prompt.choices[0].message.content.strip()
-        
-        # Use DALL-E 3 for image generation.
-        image_response = openai.Image.create(
-            model="dall-e-3",
-            prompt=image_prompt,
-            n=1,
-            size="1024x576",  # Ensures a 16:9 aspect ratio
-            response_format="b64_json"
-        )
-        generated_image_base64 = image_response['data'][0]['b64_json']
+        generated_image_base64 = response.choices[0].message.content.strip()
         return generated_image_base64
     except Exception as e:
         st.error(f"Error generating image: {e}")
@@ -344,7 +336,7 @@ def main():
                     st.write(openai_description)
         
         st.subheader("Generated Thumbnail")
-        with st.spinner("Generating hyper realistic image from analysis..."):
+        with st.spinner("Generating photorealistic image using GPT-4o..."):
             generated_image_base64 = generate_image_from_analysis(
                 vision_results if vision_results else {"no_vision_api": True},
                 openai_description
@@ -352,7 +344,7 @@ def main():
             if generated_image_base64:
                 generated_image_bytes = base64.b64decode(generated_image_base64)
                 generated_image = Image.open(io.BytesIO(generated_image_bytes))
-                st.image(generated_image, caption="Generated Hyper Realistic Thumbnail", use_column_width=True)
+                st.image(generated_image, caption="Generated Photorealistic Thumbnail", use_column_width=True)
 
 if __name__ == "__main__":
     main()
