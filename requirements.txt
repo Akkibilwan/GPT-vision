@@ -1,7 +1,6 @@
-streamlit==1.32.0
-pillow==10.0.0
-google-cloud-vision==3.4.0
-google-auth==2.22.0
-openai>=0.28.0  # Compatible with both old and new versions
-requests==2.31.0
-python-dotenv==1.0.0
+streamlit
+openai>=1.0.0
+google-cloud-vision
+google-auth
+Pillow
+requests
