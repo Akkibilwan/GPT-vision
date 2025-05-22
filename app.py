@@ -9,10 +9,10 @@ from PIL import Image
 from google.cloud import vision
 from google.oauth2 import service_account
 import openai
+from openai.error import APIError, RateLimitError, OpenAIError
 import base64
-from openai import error as OpenAIError
 
-# --- CONFIG & CSS ----------------------------------------------------------------
+# --- PAGE CONFIG & CSS -----------------------------------------------------------
 
 st.set_page_config(
     page_title="YouTube Thumbnail Analyzer & Generator",
@@ -22,29 +22,40 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-  /* (Your existing dark‐mode CSS here) */
+    /* Dark-mode YouTube-style */
+    .main { background-color: #0f0f0f; color: #f1f1f1; }
+    .stApp { background-color: #0f0f0f; }
+    h1,h2,h3 { color: #f1f1f1; font-family: 'Roboto', sans-serif; }
+    p,li,div { color: #aaaaaa; }
+    .stTabs [data-baseweb="tab"] { background-color: #272727; color: #f1f1f1; border-radius:4px 4px 0 0; padding:8px 16px; }
+    .stTabs [aria-selected="true"] { background-color: #ff0000; color:white; }
+    .stButton>button { background-color:#ff0000; color:white; border:none; border-radius:2px; padding:8px 16px; }
+    .stTextInput input, .stTextArea textarea { background-color:#121212; color:#f1f1f1; border:1px solid #303030; border-radius:20px; }
+    .thumbnail-container, .generated-image-container, .stExpander, .stAlert { background-color:#181818; border:1px solid #303030; border-radius:8px; padding:10px; }
+    .stRadio label { color:#f1f1f1 !important; }
+    pre { background-color:#121212 !important; }
+    code { color:#a9dc76 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- HELPER: OpenAI RETRY LOGIC --------------------------------------------------
+# --- HELPER: OPENAI RETRY --------------------------------------------------------
 
 def call_with_retries(func, *args, max_retries=3, backoff=1, **kwargs):
     for i in range(max_retries):
         try:
             return func(*args, **kwargs)
-        except OpenAIError.APIError as e:
+        except APIError as e:
             status = getattr(e, "http_status", 500)
             if 500 <= status < 600:
                 time.sleep(backoff * (2**i))
                 continue
             raise
-        except OpenAIError.RateLimitError:
+        except RateLimitError:
             time.sleep(backoff * (2**i))
             continue
-    # final failure
-    raise
+    raise OpenAIError("Retries exhausted")
 
-# --- CREDENTIALS ------------------------------------------------------------------
+# --- CREDENTIALS SETUP -----------------------------------------------------------
 
 def setup_credentials():
     vision_client = None
@@ -60,7 +71,7 @@ def setup_credentials():
             creds = service_account.Credentials.from_service_account_file("service-account.json")
             vision_client = vision.ImageAnnotatorClient(credentials=creds)
         else:
-            st.info("Google Vision credentials not found; skipping.")
+            st.info("Google Vision credentials not found; continuing without Vision API.")
     except Exception as e:
         st.warning(f"Vision API init failed: {e}")
 
@@ -76,34 +87,38 @@ def setup_credentials():
 
     return vision_client
 
-# --- YT THUMB HELPERS ------------------------------------------------------------
+# --- YOUTUBE THUMBNAIL HELPERS --------------------------------------------------
 
 def extract_video_id(url):
-    m = re.match(r'(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([^&]{11})', url)
+    m = re.match(
+        r'(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([^&]{11})',
+        url
+    )
     return m.group(1) if m else None
 
 def get_thumbnail_url(vid):
     for size in ("maxresdefault","hqdefault","mqdefault","default"):
         url = f"https://img.youtube.com/vi/{vid}/{size}.jpg"
-        r = requests.head(url)
-        if r.status_code == 200 and int(r.headers.get("Content-Length","0"))>1000:
+        r = requests.head(url, allow_redirects=True)
+        if r.status_code == 200 and int(r.headers.get("Content-Length","0")) > 1000:
             return url
     return None
 
 def download_bytes(url):
     r = requests.get(url, stream=True)
-    return r.content if r.status_code==200 else None
+    return r.content if r.status_code == 200 else None
 
-def encode_image(bts): return base64.b64encode(bts).decode()
+def encode_image(bts):
+    return base64.b64encode(bts).decode()
 
-# --- VISION + OPENAI ANALYSIS ----------------------------------------------------
+# --- ANALYSIS FUNCTIONS ---------------------------------------------------------
 
-def analyze_with_openai(base64_image: str):
+def analyze_with_openai(base64_image: str) -> str:
     messages = [{
         "role": "user",
         "content": [
-            {"type":"text","text":"Analyze this YouTube thumbnail in detail."},
-            {"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{base64_image}"}} 
+            {"type": "text", "text": "Analyze this YouTube thumbnail in detail."},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}} 
         ]
     }]
     try:
@@ -112,38 +127,37 @@ def analyze_with_openai(base64_image: str):
             model="gpt-4o", messages=messages, max_tokens=500
         )
         return resp.choices[0].message.content
-    except OpenAIError.OpenAIError as e:
-        st.error(f"OpenAI error ({getattr(e,'http_status','?')}): {e}")
+    except OpenAIError as e:
+        st.error(f"OpenAI error: {e}")
         return ""
 
-def analyze_with_vision(image_bytes, client):
+def analyze_with_vision(image_bytes, client) -> dict:
     img = vision.Image(content=image_bytes)
-    lbls = client.label_detection(image=img).label_annotations
-    props = client.image_properties(image=img).image_properties_annotation.dominant_colors.colors
+    labels = client.label_detection(image=img).label_annotations[:3]
+    colors = client.image_properties(image=img)\
+                   .image_properties_annotation.dominant_colors.colors[:3]
     return {
-        "labels": [{"desc": l.description, "score": l.score} for l in lbls[:3]],
-        "colors": [{
-            "rgb": (c.color.red, c.color.green, c.color.blue),
-            "score": c.score
-        } for c in props[:3]]
+        "labels": [{"desc": l.description, "score": l.score} for l in labels],
+        "colors": [
+            {"rgb": (c.color.red, c.color.green, c.color.blue), "score": c.score}
+            for c in colors
+        ]
     }
 
-# --- STRUCTURED ANALYSIS ---------------------------------------------------------
-
-def generate_analysis(vision_res, text_res):
+def generate_analysis(vision_res: dict, text_res: str) -> str:
     payload = {
         "labels": vision_res.get("labels", []),
         "colors": vision_res.get("colors", []),
-        "text": text_res
+        "description": text_res
     }
     prompt = (
-        "You are an expert thumbnail analyst. "
-        "Given this data, produce a structured analysis with headings & bullets:\n"
+        "You are a thumbnail analysis expert. Given this data, "
+        "produce a structured analysis with headings and bullets:\n"
         + json.dumps(payload)
     )
     messages = [
-        {"role":"system","content":"You are a thumbnail analysis expert."},
-        {"role":"user","content":prompt}
+        {"role": "system", "content": "You are a thumbnail analysis expert."},
+        {"role": "user", "content": prompt}
     ]
     try:
         resp = call_with_retries(
@@ -151,17 +165,17 @@ def generate_analysis(vision_res, text_res):
             model="gpt-4o", messages=messages, max_tokens=600
         )
         return resp.choices[0].message.content
-    except OpenAIError.OpenAIError as e:
-        st.error(f"Analysis failed: {e}")
+    except OpenAIError as e:
+        st.error(f"Analysis generation failed: {e}")
         return "Analysis unavailable."
 
 # --- PROMPT PARAGRAPH ------------------------------------------------------------
 
-def generate_prompt_paragraph(vision_res, text_res):
+def generate_prompt_paragraph(vision_res: dict, text_res: str) -> str:
     payload = {
         "labels": vision_res.get("labels", []),
         "colors": vision_res.get("colors", []),
-        "text": text_res
+        "description": text_res
     }
     prompt = (
         "You are a thumbnail description expert. "
@@ -169,8 +183,8 @@ def generate_prompt_paragraph(vision_res, text_res):
         + json.dumps(payload)
     )
     messages = [
-        {"role":"system","content":"You write precise thumbnail descriptions."},
-        {"role":"user","content":prompt}
+        {"role": "system", "content": "You write precise thumbnail descriptions."},
+        {"role": "user",   "content": prompt}
     ]
     try:
         resp = call_with_retries(
@@ -178,15 +192,15 @@ def generate_prompt_paragraph(vision_res, text_res):
             model="gpt-4o", messages=messages, max_tokens=600
         )
         return resp.choices[0].message.content
-    except OpenAIError.OpenAIError as e:
-        st.error(f"Description failed: {e}")
+    except OpenAIError as e:
+        st.error(f"Description generation failed: {e}")
         return ""
 
 # --- IMAGE GENERATION ------------------------------------------------------------
 
-def generate_image_from_prompt(prompt, n=1):
+def generate_image_from_prompt(prompt: str, n=1) -> list[str]:
     enhanced = (
-        f"Hyper-realistic YouTube thumbnail 16:9 HD. {prompt}"
+        f"Hyper-realistic YouTube thumbnail with 16:9 aspect ratio HD. {prompt}"
     )
     try:
         resp = call_with_retries(
@@ -194,20 +208,20 @@ def generate_image_from_prompt(prompt, n=1):
             prompt=enhanced, n=n, size="1792x1024", response_format="url"
         )
         return [d["url"] for d in resp["data"]]
-    except OpenAIError.OpenAIError as e:
-        st.error(f"Image gen failed: {e}")
+    except OpenAIError as e:
+        st.error(f"Image generation failed: {e}")
         return []
 
 # --- VARIATIONS ------------------------------------------------------------------
 
-def generate_prompt_variations(original):
+def generate_prompt_variations(original: str) -> str:
     variation_prompt = (
         "Generate TWO distinct alternative thumbnail descriptions "
         "based on this one:\n" + original
     )
     messages = [
-        {"role":"system","content":"You craft varied thumbnail prompts."},
-        {"role":"user","content":variation_prompt}
+        {"role": "system", "content": "You craft varied thumbnail prompts."},
+        {"role": "user",   "content": variation_prompt}
     ]
     try:
         resp = call_with_retries(
@@ -215,8 +229,8 @@ def generate_prompt_variations(original):
             model="gpt-4o", messages=messages, max_tokens=800
         )
         return resp.choices[0].message.content
-    except OpenAIError.OpenAIError as e:
-        st.error(f"Variation gen failed: {e}")
+    except OpenAIError as e:
+        st.error(f"Variation generation failed: {e}")
         return "VARIATION 1: …\n\nVARIATION 2: …"
 
 # --- MAIN APP -------------------------------------------------------------------
@@ -229,65 +243,77 @@ def main():
         'YouTube Thumbnail Analyzer & Generator</h1></div>',
         unsafe_allow_html=True
     )
+
     vision_client = setup_credentials()
 
-    # Input selection
-    choice = st.radio("Input:", ["Upload Image","YouTube URL"], horizontal=True)
+    choice = st.radio("Select Input Method:", ["Upload Image", "YouTube URL"], horizontal=True)
     image_bytes = None
 
-    if choice=="Upload Image":
-        up = st.file_uploader("Upload JPEG/PNG", type=["jpg","jpeg","png"])
-        if up: image_bytes = up.read()
+    if choice == "Upload Image":
+        up = st.file_uploader("Upload a thumbnail image...", type=["jpg", "jpeg", "png"])
+        if up:
+            image_bytes = up.read()
     else:
-        url = st.text_input("YouTube URL:")
-        if vid:=extract_video_id(url):
-            thumb = get_thumbnail_url(vid)
-            if thumb: image_bytes = download_bytes(thumb)
-            else: st.error("No thumbnail found.")
+        url = st.text_input("Enter YouTube URL:", placeholder="https://www.youtube.com/watch?v=...")
+        if vid := extract_video_id(url):
+            thumb_url = get_thumbnail_url(vid)
+            if thumb_url:
+                image_bytes = download_bytes(thumb_url)
+            else:
+                st.error("Could not retrieve thumbnail for this video.")
+        elif url:
+            st.error("Invalid YouTube URL.")
 
     if not image_bytes:
         return
 
     img = Image.open(io.BytesIO(image_bytes))
-    col1, col2 = st.columns([1,2])
+    col1, col2 = st.columns([1, 2])
     with col1:
-        st.image(img, use_column_width=True)
+        st.image(img, caption="Original Thumbnail", use_column_width=True)
 
-    # ANALYSIS
-    with st.spinner("Analyzing…"):
+    # --- ANALYZE ---------------------------------------------------------------
+
+    with st.spinner("Analyzing thumbnail..."):
         b64 = encode_image(image_bytes)
         text_desc = analyze_with_openai(b64)
-        vision_res = analyze_with_vision(image_bytes, vision_client) if vision_client else {"labels":[], "colors":[]}
-        analysis = generate_analysis(vision_res, text_desc)
+        vision_res = analyze_with_vision(image_bytes, vision_client) if vision_client else {"labels": [], "colors": []}
+        structured = generate_analysis(vision_res, text_desc)
 
     with col2:
         st.subheader("Structured Analysis")
-        st.markdown(analysis)
+        st.markdown(structured)
 
-    # PROMPT + REGEN
+    # --- PROMPT & GENERATE ---------------------------------------------------
+
     prompt_para = generate_prompt_paragraph(vision_res, text_desc)
-    st.subheader("Prompt for Generation")
-    st.text_area("", prompt_para, height=150)
+    st.subheader("Generated Prompt")
+    st.text_area("Thumbnail description:", prompt_para, height=150)
 
-    if urls := generate_image_from_prompt(prompt_para):
-        gen = download_bytes(urls[0])
-        gen_img = Image.open(io.BytesIO(gen))
-        st.image(gen_img, caption="AI‐Generated Thumbnail", use_column_width=True)
-        buf = io.BytesIO(); gen_img.save(buf, format="PNG"); buf.seek(0)
-        st.download_button("Download PNG", buf, "thumb.png")
+    urls = generate_image_from_prompt(prompt_para)
+    if urls:
+        gen_bytes = download_bytes(urls[0])
+        gen_img = Image.open(io.BytesIO(gen_bytes))
+        st.subheader("AI-Generated Thumbnail")
+        st.image(gen_img, use_column_width=True)
+        buf = io.BytesIO()
+        gen_img.save(buf, format="PNG")
+        buf.seek(0)
+        st.download_button("Download Generated Thumbnail", buf, "generated_thumbnail.png", mime="image/png")
 
-    # VARIATIONS
+    # --- PROMPT VARIATIONS ---------------------------------------------------
+
     st.subheader("Alternative Prompts")
     vars_text = generate_prompt_variations(prompt_para)
-    v1, v2 = vars_text.split("VARIATION 2:",1)
-    v1 = v1.replace("VARIATION 1:","").strip()
-    v2 = v2.strip()
+    parts = vars_text.split("VARIATION 2:", 1)
+    v1 = parts[0].replace("VARIATION 1:", "").strip()
+    v2 = parts[1].strip() if len(parts) > 1 else ""
 
-    tabs = st.tabs(["Var 1","Var 2"])
+    tabs = st.tabs(["Variation 1", "Variation 2"])
     with tabs[0]:
-        st.text_area("", v1, height=120)
+        st.text_area("Variation 1:", v1, height=120)
     with tabs[1]:
-        st.text_area("", v2, height=120)
+        st.text_area("Variation 2:", v2, height=120)
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
