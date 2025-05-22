@@ -9,7 +9,6 @@ from google.cloud import vision
 from google.oauth2 import service_account
 import openai
 import base64
-import time
 
 # Set page configuration
 st.set_page_config(
@@ -64,8 +63,7 @@ st.markdown("""
 def setup_credentials():
     vision_client = None
     openai_client = None
-    
-    # Google Vision API
+    # Google Vision
     try:
         if 'GOOGLE_CREDENTIALS' in st.secrets:
             creds = st.secrets["GOOGLE_CREDENTIALS"]
@@ -80,12 +78,10 @@ def setup_credentials():
             path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
             if path and os.path.exists(path):
                 vision_client = vision.ImageAnnotatorClient()
-            else:
-                st.info("Google Vision API credentials not found. Analysis will use only OpenAI.")
     except Exception as e:
         st.info(f"Google Vision API not available: {e}")
-    
-    # OpenAI API
+
+    # OpenAI
     try:
         api_key = st.secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -95,18 +91,9 @@ def setup_credentials():
             try:
                 openai_client = openai.OpenAI(api_key=api_key)
             except TypeError as e:
-                if 'proxies' in str(e):
-                    try:
-                        openai_client = openai.OpenAI()
-                    except:
-                        openai_client = openai
-                        st.info("Using legacy OpenAI client")
-                else:
-                    raise
+                openai_client = openai
     except Exception as e:
         st.error(f"Error setting up OpenAI API: {e}")
-        st.info("Try updating the OpenAI library with 'pip install --upgrade openai'")
-    
     return vision_client, openai_client
 
 def extract_video_id(url):
@@ -152,19 +139,14 @@ def analyze_with_vision(image_bytes, client):
             "labels": [{"description": l.description, "score": float(l.score)} for l in labels],
             "text": [{"description": t.description, "confidence": float(getattr(t, 'confidence', 0))} for t in text],
             "faces": [
-                {
-                    "joy": f.joy_likelihood.name,
-                    "sorrow": f.sorrow_likelihood.name,
-                    "anger": f.anger_likelihood.name,
-                    "surprise": f.surprise_likelihood.name
-                } for f in faces
+                {"joy": f.joy_likelihood.name, "sorrow": f.sorrow_likelihood.name,
+                 "anger": f.anger_likelihood.name, "surprise": f.surprise_likelihood.name}
+                for f in faces
             ],
             "logos": [{"description": lg.description} for lg in logos],
             "colors": [
-                {
-                    "color": {"red": c.color.red, "green": c.color.green, "blue": c.color.blue},
-                    "score": float(c.score), "pixel_fraction": float(c.pixel_fraction)
-                }
+                {"color": {"red": c.color.red, "green": c.color.green, "blue": c.color.blue},
+                 "score": float(c.score), "pixel_fraction": float(c.pixel_fraction)}
                 for c in props.dominant_colors.colors[:5]
             ]
         }
@@ -225,7 +207,7 @@ Analysis data:
 
 def generate_prompt_paragraph(client, vision_results, openai_desc):
     prompt = f"""
-Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail...
+Based on the provided thumbnail analyses from Google Vision AI and your own image reading, create a SINGLE COHESIVE PARAGRAPH that very specifically defines the thumbnail.
 Analysis data:
 {json.dumps({'vision_analysis': vision_results, 'openai_description': openai_desc}, indent=2)}
 """
@@ -246,7 +228,7 @@ Analysis data:
 
 def generate_image_from_prompt(client, prompt, image_count=1):
     """
-    Generate a YouTube-style thumbnail using GPT-4o's image capability.
+    Generate a YouTube-style thumbnail using ChatGPT’s image capability.
     """
     enhanced = (
         f"Create a hyper-realistic YouTube thumbnail with a 16:9 aspect ratio based on this description: {prompt}\n\n"
@@ -256,17 +238,17 @@ def generate_image_from_prompt(client, prompt, image_count=1):
     try:
         if hasattr(client, 'images') and hasattr(client.images, 'generate'):
             response = client.images.generate(
-                model="gpt-4o",          # ← now using GPT-4o for image generation
+                model="gpt-image-1",    # ← switched to the supported ChatGPT image model
                 prompt=enhanced,
                 n=image_count,
-                size="1792x1024",        # 16:9 aspect ratio
+                size="1792x1024",       # 16:9 aspect ratio
                 quality="hd",
                 style="vivid"
             )
             return [d.url for d in response.data]
     except Exception as e:
         st.error(f"Image generation error: {e}")
-        st.info("Ensure your API key has GPT-4o image permissions.")
+        st.info("Ensure your API key has permissions for ChatGPT’s image endpoint (gpt-image-1).")
     return None
 
 def download_image(url):
@@ -399,7 +381,7 @@ def main():
                     st.image(gen_img, caption="AI-Generated Thumbnail", use_column_width=True)
                     st.markdown('</div>', unsafe_allow_html=True)
             else:
-                st.error("Failed to generate image. Check GPT-4o image permissions.")
+                st.error("Failed to generate image. Check ChatGPT image permissions.")
 
         st.subheader("Alternative Prompts")
         with st.spinner("Generating prompt variations..."):
@@ -438,4 +420,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
